@@ -79,6 +79,7 @@ class TranslatorController extends Controller
             ])->deleteFileAfterSend(true);
         } catch (Throwable $e) {
             @unlink($output);
+            report($e);
             return response()->json(['error' => 'Terjadi kesalahan saat memproses dokumen: '.$e->getMessage()], 500);
         } finally {
             @unlink($input);
@@ -114,6 +115,7 @@ class TranslatorController extends Controller
                 ->deleteFileAfterSend(true);
         } catch (Throwable $e) {
             @unlink($output);
+            report($e);
             $status = str_contains($e->getMessage(), 'OCR tidak tersedia') ? 503 : 500;
             return response()->json(['error' => $e->getMessage()], $status);
         } finally {
