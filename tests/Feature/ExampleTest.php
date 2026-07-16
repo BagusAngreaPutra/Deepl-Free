@@ -15,7 +15,8 @@ class ExampleTest extends TestCase
         $response = $this->get('/');
 
         $response->assertStatus(200);
-        $response->assertSee('DOCX Translator Pro');
+        $response->assertSee('Terjemahkan banyak file DOCX sekaligus.');
+        $response->assertSee('multiple hidden', false);
         $response->assertSee('Standard British English');
     }
 
