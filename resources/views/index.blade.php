@@ -30,6 +30,27 @@
         <button type="button" class="choose-btn" id="chooseBtn">Pilih file</button>
       </label>
 
+      <div class="language-picker" aria-label="Pilihan bahasa">
+        <div class="field-group">
+          <label for="sourceLanguage">Dari</label>
+          <select id="sourceLanguage" name="source_language">
+            <option value="auto">Deteksi otomatis</option>
+            <option value="id">Indonesia</option>
+            <option value="en-US">English (United States)</option>
+            <option value="en-GB">English (United Kingdom)</option>
+          </select>
+        </div>
+        <button type="button" class="swap-btn" id="swapLanguages" aria-label="Tukar bahasa" title="Tukar bahasa">⇄</button>
+        <div class="field-group">
+          <label for="targetLanguage">Ke</label>
+          <select id="targetLanguage" name="target_language">
+            <option value="en-GB">English (United Kingdom)</option>
+            <option value="en-US">English (United States)</option>
+            <option value="id">Indonesia</option>
+          </select>
+        </div>
+      </div>
+
       <div class="settings-grid">
         <div class="field-group">
           <label for="profile">Gaya hasil</label>

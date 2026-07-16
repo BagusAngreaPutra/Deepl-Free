@@ -11,6 +11,9 @@ use Throwable;
 
 class TranslatorController extends Controller
 {
+    private const SOURCE_LANGUAGES = ['auto', 'id', 'en-US', 'en-GB'];
+    private const TARGET_LANGUAGES = ['id', 'en-US', 'en-GB'];
+
     private const PROFILES = [
         'standard' => ['label' => 'Standard British English', 'description' => 'General British spelling and light polishing.'],
         'academic' => ['label' => 'British Academic English', 'description' => 'Academic phrasing and cleaner university-style English.'],
@@ -35,6 +38,8 @@ class TranslatorController extends Controller
             'docx_file' => ['required', 'file', 'mimes:docx', 'max:'.config('translator.max_upload_kb')],
             'profile' => ['nullable', 'in:'.implode(',', array_keys(self::PROFILES))],
             'custom_words' => ['nullable', 'string'],
+            'source_language' => ['nullable', 'in:'.implode(',', self::SOURCE_LANGUAGES)],
+            'target_language' => ['nullable', 'in:'.implode(',', self::TARGET_LANGUAGES)],
         ], [
             'docx_file.required' => 'File DOCX belum dipilih.',
             'docx_file.mimes' => 'Format file harus .docx',
@@ -47,7 +52,8 @@ class TranslatorController extends Controller
         if (!is_dir($directory)) mkdir($directory, 0775, true);
         $input = $directory.DIRECTORY_SEPARATOR.$token.'_input.docx';
         $stem = pathinfo($file->getClientOriginalName(), PATHINFO_FILENAME) ?: 'document';
-        $downloadName = $stem.' en-GB.docx';
+        $targetLanguage = $request->string('target_language')->value() ?: 'en-GB';
+        $downloadName = $stem.' '.$targetLanguage.'.docx';
         $output = $directory.DIRECTORY_SEPARATOR.$token.'_output.docx';
         $file->move($directory, basename($input));
 
@@ -56,6 +62,8 @@ class TranslatorController extends Controller
                 '--input', $input, '--output', $output,
                 '--profile', $request->string('profile')->value() ?: 'edu_academic',
                 '--custom-words', base64_encode($request->string('custom_words')->value()),
+                '--source-language', $request->string('source_language')->value() ?: 'auto',
+                '--target-language', $targetLanguage,
             ]);
             $summary = $result['summary'];
             return response()->download($output, $downloadName, [
@@ -66,6 +74,7 @@ class TranslatorController extends Controller
                 'X-Errors' => (string) ($summary['errors'] ?? 0),
                 'X-Elapsed-Seconds' => number_format($summary['elapsed_seconds'] ?? 0, 1, '.', ''),
                 'X-Profile' => (string) ($summary['profile'] ?? 'edu_academic'),
+                'X-Target-Language' => $targetLanguage,
             ])->deleteFileAfterSend(true);
         } catch (Throwable $e) {
             @unlink($output);

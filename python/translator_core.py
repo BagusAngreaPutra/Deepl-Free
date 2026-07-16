@@ -346,14 +346,35 @@ def academic_polish(text: str, profile: str = 'academic') -> str:
     return text
 
 
-def _get_translator():
+def normalise_google_language(language: str) -> str:
+    return 'en' if language in {'en-US', 'en-GB'} else language
+
+
+def apply_output_style(
+    text: str,
+    target_language: str,
+    profile: str,
+    custom_words: Dict[str, str] | None = None,
+) -> str:
+    if target_language == 'en-GB':
+        text = apply_british_dictionary(text, custom_words=custom_words)
+    elif custom_words:
+        for pattern, replacement in custom_words.items():
+            text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+    return academic_polish(text, profile=profile) if target_language.startswith('en-') else text
+
+
+def _get_translator(source_language: str = 'auto', target_language: str = 'en-GB'):
     from deep_translator import GoogleTranslator
-    return GoogleTranslator(source='auto', target='en')
+    return GoogleTranslator(
+        source=normalise_google_language(source_language),
+        target=normalise_google_language(target_language),
+    )
 
 
-def translate_batch(batch_texts: List[str]) -> List[str]:
+def translate_batch(batch_texts: List[str], source_language: str = 'auto', target_language: str = 'en-GB') -> List[str]:
     combined = SEPARATOR.join(batch_texts)
-    translated = _get_translator().translate(combined)
+    translated = _get_translator(source_language, target_language).translate(combined)
     if SEPARATOR in translated:
         parts = translated.split(SEPARATOR)
     else:
@@ -370,6 +391,8 @@ def google_translate_paragraphs(
     texts: List[str],
     profile: str = 'academic',
     custom_words: Dict[str, str] | None = None,
+    source_language: str = 'auto',
+    target_language: str = 'en-GB',
 ) -> List[str]:
     results = [''] * len(texts)
     to_translate: List[Tuple[int, str, Dict[str, str]]] = []
@@ -384,7 +407,7 @@ def google_translate_paragraphs(
             stats['skipped'] += 1
             continue
 
-        protected_text, replacements = protect_terms(text, profile)
+        protected_text, replacements = protect_terms(text, profile) if target_language.startswith('en-') else (text, {})
         to_translate.append((i, protected_text, replacements))
 
     cursor = 0
@@ -409,11 +432,10 @@ def google_translate_paragraphs(
         replacements_list = [item[2] for item in batch]
 
         try:
-            parts = translate_batch(batch_texts)
+            parts = translate_batch(batch_texts, source_language, target_language)
             for idx, original_src, replacements, translated in zip(indices, batch_texts, replacements_list, parts):
                 restored = restore_terms(translated, replacements)
-                polished = apply_british_dictionary(restored, custom_words=custom_words)
-                polished = academic_polish(polished, profile=profile)
+                polished = apply_output_style(restored, target_language, profile, custom_words)
                 translate_cache[texts[idx]] = polished
                 results[idx] = polished
                 stats['translated'] += 1
@@ -421,10 +443,9 @@ def google_translate_paragraphs(
             # Fallback: translate paragraph by paragraph for better resilience.
             for idx, original_src, replacements in zip(indices, batch_texts, replacements_list):
                 try:
-                    translated = _get_translator().translate(original_src)
+                    translated = _get_translator(source_language, target_language).translate(original_src)
                     restored = restore_terms(translated, replacements)
-                    polished = apply_british_dictionary(restored, custom_words=custom_words)
-                    polished = academic_polish(polished, profile=profile)
+                    polished = apply_output_style(restored, target_language, profile, custom_words)
                     translate_cache[texts[idx]] = polished
                     results[idx] = polished
                     stats['translated'] += 1
@@ -492,6 +513,8 @@ def process_xml_part(
     xml_content: bytes,
     profile: str = 'academic',
     custom_words: Dict[str, str] | None = None,
+    source_language: str = 'auto',
+    target_language: str = 'en-GB',
 ) -> bytes:
     try:
         tree = etree.fromstring(xml_content)
@@ -500,7 +523,13 @@ def process_xml_part(
 
     paragraphs = tree.findall(f'.//{{{W}}}p')
     orig_texts = [get_paragraph_text(p) for p in paragraphs]
-    translated = google_translate_paragraphs(orig_texts, profile=profile, custom_words=custom_words)
+    translated = google_translate_paragraphs(
+        orig_texts,
+        profile=profile,
+        custom_words=custom_words,
+        source_language=source_language,
+        target_language=target_language,
+    )
 
     for para, new_text in zip(paragraphs, translated):
         if new_text and new_text != get_paragraph_text(para):
@@ -514,6 +543,8 @@ def translate_docx_v3(
     output_path: str,
     custom_words: Dict[str, str] | None = None,
     profile: str = 'edu_academic',
+    source_language: str = 'auto',
+    target_language: str = 'en-GB',
 ):
     global stats
     stats = {'translated': 0, 'cached': 0, 'skipped': 0, 'errors': 0}
@@ -546,6 +577,8 @@ def translate_docx_v3(
                 xml_content,
                 profile=profile,
                 custom_words=custom_words,
+                source_language=source_language,
+                target_language=target_language,
             )
 
         tmp_output = os.path.join(tmp_dir, 'output.docx')
@@ -570,4 +603,6 @@ def translate_docx_v3(
         'elapsed_seconds': elapsed,
         'output_path': output_path,
         'profile': profile,
+        'source_language': source_language,
+        'target_language': target_language,
     }

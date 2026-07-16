@@ -76,12 +76,21 @@ def main() -> None:
     parser.add_argument('--output', required=True)
     parser.add_argument('--profile', default='edu_academic')
     parser.add_argument('--custom-words', default='')
+    parser.add_argument('--source-language', default='auto', choices=['auto', 'id', 'en-US', 'en-GB'])
+    parser.add_argument('--target-language', default='en-GB', choices=['id', 'en-US', 'en-GB'])
     args = parser.parse_args()
     custom_raw = base64.b64decode(args.custom_words).decode('utf-8') if args.custom_words else ''
     custom_words = parse_custom_words(custom_raw)
 
     if args.operation == 'docx':
-        summary = translate_docx_v3(args.input, args.output, custom_words=custom_words, profile=args.profile)
+        summary = translate_docx_v3(
+            args.input,
+            args.output,
+            custom_words=custom_words,
+            profile=args.profile,
+            source_language=args.source_language,
+            target_language=args.target_language,
+        )
         emit({'ok': True, 'summary': summary})
 
     try:

@@ -18,6 +18,8 @@ class ExampleTest extends TestCase
         $response->assertSee('Pilih atau tarik file DOCX ke sini');
         $response->assertSee('multiple hidden', false);
         $response->assertSee('Standard British English');
+        $response->assertSee('English (United States)');
+        $response->assertSee('English (United Kingdom)');
     }
 
     public function test_health_endpoint_returns_ok(): void

@@ -13,10 +13,23 @@ const queueTitle = document.getElementById('queueTitle');
 const queueSummary = document.getElementById('queueSummary');
 const fileList = document.getElementById('fileList');
 const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+const sourceLanguage = document.getElementById('sourceLanguage');
+const targetLanguage = document.getElementById('targetLanguage');
 
 let items = [];
 let running = false;
 let audioContext;
+
+document.getElementById('swapLanguages').addEventListener('click', () => {
+  if (sourceLanguage.value === 'auto') {
+    sourceLanguage.value = targetLanguage.value;
+    targetLanguage.value = sourceLanguage.value === 'id' ? 'en-GB' : 'id';
+    return;
+  }
+  const previousSource = sourceLanguage.value;
+  sourceLanguage.value = targetLanguage.value;
+  targetLanguage.value = previousSource === 'auto' ? 'en-GB' : previousSource;
+});
 
 chooseBtn.addEventListener('click', (event) => {
   event.preventDefault();
@@ -157,6 +170,8 @@ function processFile(item) {
   data.append('docx_file', item.file);
   data.append('profile', document.getElementById('profile').value);
   data.append('custom_words', document.getElementById('customWords').value);
+  data.append('source_language', sourceLanguage.value);
+  data.append('target_language', targetLanguage.value);
 
   return new Promise((resolve) => {
     const xhr = new XMLHttpRequest();
@@ -176,7 +191,7 @@ function processFile(item) {
       if (xhr.status >= 200 && xhr.status < 300) {
         item.state = 'done'; item.progress = 100; item.message = 'Selesai';
         item.downloadUrl = URL.createObjectURL(xhr.response);
-        item.downloadName = getFilename(xhr.getResponseHeader('Content-Disposition')) || `${stripExtension(item.file.name)} en-GB.docx`;
+        item.downloadName = getFilename(xhr.getResponseHeader('Content-Disposition')) || `${stripExtension(item.file.name)} ${targetLanguage.value}.docx`;
         render();
         downloadResult(item);
       } else {
