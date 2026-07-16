@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Services\PythonWorker;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Throwable;
@@ -35,6 +36,15 @@ class TranslatorController extends Controller
 
     public function translate(Request $request): JsonResponse|BinaryFileResponse
     {
+        $requestId = (string) Str::uuid();
+        $startedAt = microtime(true);
+        Log::info('translation.request_received', [
+            'request_id' => $requestId,
+            'content_length' => $request->server('CONTENT_LENGTH'),
+            'source_language' => $request->input('source_language', 'auto'),
+            'target_language' => $request->input('target_language', 'en-GB'),
+        ]);
+
         $request->validate([
             'docx_file' => ['required', 'file', 'mimes:docx', 'max:'.config('translator.max_upload_kb')],
             'profile' => ['nullable', 'in:'.implode(',', array_keys(self::PROFILES))],
@@ -48,6 +58,12 @@ class TranslatorController extends Controller
         ]);
 
         $file = $request->file('docx_file');
+        Log::info('translation.validated', [
+            'request_id' => $requestId,
+            'original_name' => $file->getClientOriginalName(),
+            'size_bytes' => $file->getSize(),
+            'mime_type' => $file->getMimeType(),
+        ]);
         $token = Str::lower(Str::random(10));
         $directory = storage_path('app/private/translator');
         if (!is_dir($directory)) mkdir($directory, 0775, true);
@@ -57,6 +73,11 @@ class TranslatorController extends Controller
         $downloadName = $stem.' '.$targetLanguage.'.docx';
         $output = $directory.DIRECTORY_SEPARATOR.$token.'_output.docx';
         $file->move($directory, basename($input));
+        Log::info('translation.input_stored', [
+            'request_id' => $requestId,
+            'input_exists' => is_file($input),
+            'directory_writable' => is_writable($directory),
+        ]);
 
         try {
             $result = $this->worker->run('docx', [
@@ -65,8 +86,15 @@ class TranslatorController extends Controller
                 '--custom-words', base64_encode($request->string('custom_words')->value()),
                 '--source-language', $request->string('source_language')->value() ?: 'auto',
                 '--target-language', $targetLanguage,
-            ]);
+            ], $requestId);
             $summary = $result['summary'];
+            Log::info('translation.completed', [
+                'request_id' => $requestId,
+                'elapsed_seconds' => round(microtime(true) - $startedAt, 3),
+                'output_exists' => is_file($output),
+                'output_size_bytes' => is_file($output) ? filesize($output) : null,
+                'summary' => $summary,
+            ]);
             return response()->download($output, $downloadName, [
                 'Content-Type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
                 'X-Translated-Paragraphs' => (string) ($summary['translated'] ?? 0),
@@ -76,13 +104,25 @@ class TranslatorController extends Controller
                 'X-Elapsed-Seconds' => number_format($summary['elapsed_seconds'] ?? 0, 1, '.', ''),
                 'X-Profile' => (string) ($summary['profile'] ?? self::DEFAULT_PROFILE),
                 'X-Target-Language' => $targetLanguage,
+                'X-Request-ID' => $requestId,
             ])->deleteFileAfterSend(true);
         } catch (Throwable $e) {
             @unlink($output);
-            report($e);
-            return response()->json(['error' => 'Terjadi kesalahan saat memproses dokumen: '.$e->getMessage()], 500);
+            Log::error('translation.failed', [
+                'request_id' => $requestId,
+                'elapsed_seconds' => round(microtime(true) - $startedAt, 3),
+                'exception' => $e,
+            ]);
+            return response()->json([
+                'error' => 'Terjadi kesalahan saat memproses dokumen: '.$e->getMessage(),
+                'error_id' => $requestId,
+            ], 500, ['X-Request-ID' => $requestId]);
         } finally {
             @unlink($input);
+            Log::debug('translation.cleanup_completed', [
+                'request_id' => $requestId,
+                'input_removed' => !is_file($input),
+            ]);
         }
     }
 
@@ -110,7 +150,7 @@ class TranslatorController extends Controller
                 '--input', $input, '--output', $output,
                 '--profile', $request->string('profile')->value() ?: self::DEFAULT_PROFILE,
                 '--custom-words', base64_encode($request->string('custom_words')->value()),
-            ]);
+            ], $token);
             return response()->download($output, 'translated_'.$token.'.png', ['Content-Type' => 'image/png'])
                 ->deleteFileAfterSend(true);
         } catch (Throwable $e) {

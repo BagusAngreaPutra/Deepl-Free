@@ -196,11 +196,15 @@ function processFile(item) {
         item.state = 'error'; item.progress = 100;
         item.message = await readError(xhr.response);
         render();
+        showToast(`Gagal: ${item.file.name}`, item.message);
       }
       resolve();
     };
     xhr.onerror = () => {
-      item.state = 'error'; item.progress = 100; item.message = 'Koneksi ke server terputus'; render(); resolve();
+      item.state = 'error'; item.progress = 100; item.message = 'Koneksi ke server terputus';
+      render();
+      showToast(`Gagal: ${item.file.name}`, item.message);
+      resolve();
     };
     xhr.send(data);
   });
@@ -218,7 +222,8 @@ function downloadResult(item) {
 async function readError(blob) {
   try {
     const data = JSON.parse(await blob.text());
-    return data.error || Object.values(data.errors || {}).flat()[0] || 'Proses gagal';
+    const message = data.error || Object.values(data.errors || {}).flat()[0] || 'Proses gagal';
+    return data.error_id ? `${message} (ID: ${data.error_id})` : message;
   } catch (_) {
     return 'Proses gagal di server';
   }
