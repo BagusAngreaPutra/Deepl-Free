@@ -5,7 +5,7 @@ Migrasi Laravel dari aplikasi Flask di folder induk. Laravel menangani halaman w
 ## Fitur
 
 - Penerjemahan DOCX termasuk body, header, footer, footnotes, endnotes, dan comments.
-- Google Translate, British spelling, academic polishing, tiga profil hasil, dan custom dictionary.
+- Google Translate, kamus British English bawaan, academic polishing, dan tiga profil hasil.
 - OCR JPG/PNG/WEBP/TIFF (Bahasa Indonesia + Inggris), penerjemahan, dan overlay hasil ke PNG.
 - Batas upload 25 MB, statistik proses melalui response header, health endpoint, dan pembersihan file sementara.
 

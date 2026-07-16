@@ -20,6 +20,7 @@ class ExampleTest extends TestCase
         $response->assertSee('Standard British English');
         $response->assertSee('English (United States)');
         $response->assertSee('English (British)');
+        $response->assertDontSee('Tambahkan kamus khusus');
     }
 
     public function test_health_endpoint_returns_ok(): void

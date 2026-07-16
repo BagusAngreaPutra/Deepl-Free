@@ -60,11 +60,6 @@
             @endforeach
           </select>
         </div>
-        <details class="dictionary">
-          <summary>Tambahkan kamus khusus <span>Opsional</span></summary>
-          <textarea id="customWords" name="custom_words" rows="5" placeholder="course contract=Course Agreement&#10;submission proof=Evidence of submission"></textarea>
-          <small>Satu pasangan kata per baris dengan format kata=terjemahan.</small>
-        </details>
       </div>
 
       <section class="queue-card" id="queueCard" aria-live="polite">

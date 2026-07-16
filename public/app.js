@@ -169,7 +169,6 @@ function processFile(item) {
   data.append('_token', csrfToken);
   data.append('docx_file', item.file);
   data.append('profile', document.getElementById('profile').value);
-  data.append('custom_words', document.getElementById('customWords').value);
   data.append('source_language', sourceLanguage.value);
   data.append('target_language', targetLanguage.value);
 
