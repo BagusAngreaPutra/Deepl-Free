@@ -20,12 +20,6 @@
   </header>
 
   <main class="container">
-    <section class="intro">
-      <span class="eyebrow">Penerjemah dokumen</span>
-      <h1>Terjemahkan banyak file DOCX sekaligus.</h1>
-      <p>Pilih dokumen, tentukan gaya bahasa, lalu biarkan antrean menyelesaikannya. Format dokumen tetap dipertahankan.</p>
-    </section>
-
     <form id="translatorForm" class="workspace">
       @csrf
       <label class="upload-zone" id="uploadZone">

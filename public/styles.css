@@ -12,11 +12,7 @@ button, select, textarea { font: inherit; }
 .brand strong, .brand small { display: block; }
 .brand small { margin-top: 3px; color: var(--muted); font-size: .76rem; }
 .secure-note { color: var(--muted); font-size: .84rem; }
-.container { width: min(920px, calc(100% - 36px)); margin: 42px auto 80px; }
-.intro { max-width: 680px; margin-bottom: 28px; }
-.eyebrow { color: var(--primary); font-size: .82rem; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
-.intro h1 { margin: 10px 0 12px; font-size: clamp(2rem, 5vw, 3.25rem); line-height: 1.08; letter-spacing: -.035em; }
-.intro p { margin: 0; color: var(--muted); line-height: 1.7; }
+.container { width: min(920px, calc(100% - 36px)); margin: 28px auto 80px; }
 .workspace { padding: 26px; border: 1px solid var(--line); border-radius: 22px; background: var(--card); box-shadow: var(--shadow); }
 .upload-zone { padding: 42px 24px; border: 1.5px dashed #bfc6dc; border-radius: 16px; background: #fafbfe; display: flex; flex-direction: column; align-items: center; text-align: center; cursor: pointer; transition: .2s; }
 .upload-zone.dragover { border-color: var(--primary); background: var(--primary-soft); transform: translateY(-2px); }
