@@ -37,14 +37,14 @@
             <option value="auto">Deteksi otomatis</option>
             <option value="id">Indonesia</option>
             <option value="en-US">English (United States)</option>
-            <option value="en-GB">English (United Kingdom)</option>
+            <option value="en-GB">English (British)</option>
           </select>
         </div>
         <button type="button" class="swap-btn" id="swapLanguages" aria-label="Tukar bahasa" title="Tukar bahasa">⇄</button>
         <div class="field-group">
           <label for="targetLanguage">Ke</label>
           <select id="targetLanguage" name="target_language">
-            <option value="en-GB">English (United Kingdom)</option>
+            <option value="en-GB">English (British)</option>
             <option value="en-US">English (United States)</option>
             <option value="id">Indonesia</option>
           </select>

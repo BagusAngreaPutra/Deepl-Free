@@ -19,7 +19,7 @@ class ExampleTest extends TestCase
         $response->assertSee('multiple hidden', false);
         $response->assertSee('Standard British English');
         $response->assertSee('English (United States)');
-        $response->assertSee('English (United Kingdom)');
+        $response->assertSee('English (British)');
     }
 
     public function test_health_endpoint_returns_ok(): void
