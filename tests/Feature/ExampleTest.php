@@ -17,7 +17,8 @@ class ExampleTest extends TestCase
         $response->assertStatus(200);
         $response->assertSee('Pilih atau tarik file DOCX ke sini');
         $response->assertSee('multiple hidden', false);
-        $response->assertSee('Standard British English');
+        $response->assertSee('JDS Trasnlator');
+        $response->assertDontSee('Gaya hasil');
         $response->assertSee('English (United States)');
         $response->assertSee('English (British)');
         $response->assertDontSee('Tambahkan kamus khusus');

@@ -74,7 +74,7 @@ def main() -> None:
     parser.add_argument('operation', choices=['docx', 'ocr'])
     parser.add_argument('--input', required=True)
     parser.add_argument('--output', required=True)
-    parser.add_argument('--profile', default='edu_academic')
+    parser.add_argument('--profile', default='academic')
     parser.add_argument('--custom-words', default='')
     parser.add_argument('--source-language', default='auto', choices=['auto', 'id', 'en-US', 'en-GB'])
     parser.add_argument('--target-language', default='en-GB', choices=['id', 'en-US', 'en-GB'])

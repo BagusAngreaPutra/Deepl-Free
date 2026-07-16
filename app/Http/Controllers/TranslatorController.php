@@ -11,6 +11,7 @@ use Throwable;
 
 class TranslatorController extends Controller
 {
+    private const DEFAULT_PROFILE = 'academic';
     private const SOURCE_LANGUAGES = ['auto', 'id', 'en-US', 'en-GB'];
     private const TARGET_LANGUAGES = ['id', 'en-US', 'en-GB'];
 
@@ -24,7 +25,7 @@ class TranslatorController extends Controller
 
     public function index()
     {
-        return view('index', ['profiles' => self::PROFILES]);
+        return view('index');
     }
 
     public function health(): JsonResponse
@@ -60,7 +61,7 @@ class TranslatorController extends Controller
         try {
             $result = $this->worker->run('docx', [
                 '--input', $input, '--output', $output,
-                '--profile', $request->string('profile')->value() ?: 'edu_academic',
+                '--profile', $request->string('profile')->value() ?: self::DEFAULT_PROFILE,
                 '--custom-words', base64_encode($request->string('custom_words')->value()),
                 '--source-language', $request->string('source_language')->value() ?: 'auto',
                 '--target-language', $targetLanguage,
@@ -73,7 +74,7 @@ class TranslatorController extends Controller
                 'X-Skipped-Paragraphs' => (string) ($summary['skipped'] ?? 0),
                 'X-Errors' => (string) ($summary['errors'] ?? 0),
                 'X-Elapsed-Seconds' => number_format($summary['elapsed_seconds'] ?? 0, 1, '.', ''),
-                'X-Profile' => (string) ($summary['profile'] ?? 'edu_academic'),
+                'X-Profile' => (string) ($summary['profile'] ?? self::DEFAULT_PROFILE),
                 'X-Target-Language' => $targetLanguage,
             ])->deleteFileAfterSend(true);
         } catch (Throwable $e) {
@@ -106,7 +107,7 @@ class TranslatorController extends Controller
         try {
             $this->worker->run('ocr', [
                 '--input', $input, '--output', $output,
-                '--profile', $request->string('profile')->value() ?: 'edu_academic',
+                '--profile', $request->string('profile')->value() ?: self::DEFAULT_PROFILE,
                 '--custom-words', base64_encode($request->string('custom_words')->value()),
             ]);
             return response()->download($output, 'translated_'.$token.'.png', ['Content-Type' => 'image/png'])
