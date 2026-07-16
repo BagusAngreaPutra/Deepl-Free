@@ -28,7 +28,13 @@ Atur `PYTHON_BINARY` di `.env`. Contoh Windows:
 ```dotenv
 PYTHON_BINARY=D:\path\to\.venv\Scripts\python.exe
 TRANSLATOR_TIMEOUT=900
+TRANSLATOR_PARALLEL_WORKERS=3
 ```
+
+Mesin menerjemahkan hingga tiga batch secara paralel, melewati teks yang sudah
+menggunakan bahasa tujuan, dan menyimpan hasil berulang pada cache SQLite di
+`storage/app/private/translator-cache.sqlite`. Gunakan 1–4 parallel worker;
+nilai 3 direkomendasikan agar lebih cepat tanpa terlalu agresif terhadap layanan terjemahan.
 
 Lalu jalankan:
 

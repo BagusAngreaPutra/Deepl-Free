@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import os
 import re
+import hashlib
 import shutil
+import sqlite3
 import tempfile
 import time
 import zipfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Dict, List, Tuple
 
@@ -28,11 +31,61 @@ TRANSLATABLE_PARTS = [
 # "Failed to fetch").
 BATCH_SIZE = 20
 MAX_BATCH_CHARS = 4500
-BATCH_DELAY = 0.05
 SEPARATOR = '\nZXQSEP001ZXQ\n'
+PARALLEL_WORKERS = max(1, min(4, int(os.getenv('TRANSLATOR_PARALLEL_WORKERS', '3'))))
+CACHE_VERSION = 'v2'
 
 translate_cache: Dict[str, str] = {}
 stats = {'translated': 0, 'cached': 0, 'skipped': 0, 'errors': 0}
+_persistent_cache_db: sqlite3.Connection | None = None
+
+
+def persistent_cache_db() -> sqlite3.Connection:
+    global _persistent_cache_db
+    if _persistent_cache_db is None:
+        cache_path = os.getenv(
+            'TRANSLATOR_CACHE_PATH',
+            os.path.abspath('storage/app/private/translator-cache.sqlite'),
+        )
+        os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+        _persistent_cache_db = sqlite3.connect(cache_path, timeout=15)
+        _persistent_cache_db.execute('PRAGMA journal_mode=WAL')
+        _persistent_cache_db.execute(
+            'CREATE TABLE IF NOT EXISTS translations ('
+            'cache_key TEXT PRIMARY KEY, translated_text TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP)'
+        )
+    return _persistent_cache_db
+
+
+def translation_cache_key(
+    text: str,
+    source_language: str,
+    target_language: str,
+    profile: str,
+    custom_words: Dict[str, str] | None,
+) -> str:
+    custom_signature = repr(sorted((custom_words or {}).items()))
+    raw = '\0'.join((CACHE_VERSION, source_language, target_language, profile, custom_signature, text))
+    return hashlib.sha256(raw.encode('utf-8')).hexdigest()
+
+
+def persistent_cache_get(cache_key: str) -> str | None:
+    row = persistent_cache_db().execute(
+        'SELECT translated_text FROM translations WHERE cache_key = ?', (cache_key,)
+    ).fetchone()
+    return row[0] if row else None
+
+
+def persistent_cache_put(cache_key: str, translated_text: str) -> None:
+    persistent_cache_db().execute(
+        'INSERT OR REPLACE INTO translations (cache_key, translated_text) VALUES (?, ?)',
+        (cache_key, translated_text),
+    )
+
+
+def persistent_cache_flush() -> None:
+    if _persistent_cache_db is not None:
+        _persistent_cache_db.commit()
 
 
 @dataclass(frozen=True)
@@ -387,6 +440,71 @@ def translate_batch(batch_texts: List[str], source_language: str = 'auto', targe
     return parts[:len(batch_texts)]
 
 
+ENGLISH_MARKERS = {
+    'the', 'and', 'of', 'to', 'in', 'is', 'are', 'for', 'with', 'that', 'this',
+    'students', 'student', 'learning', 'course', 'assessment', 'outcomes', 'will',
+}
+INDONESIAN_MARKERS = {
+    'dan', 'yang', 'di', 'ke', 'dari', 'untuk', 'dengan', 'adalah', 'ini', 'itu',
+    'mahasiswa', 'pembelajaran', 'mata', 'kuliah', 'penilaian', 'capaian', 'akan',
+}
+
+
+def already_in_target_language(text: str, source_language: str, target_language: str) -> bool:
+    if source_language != 'auto':
+        return False
+    words = re.findall(r"[a-zA-ZÀ-ÿ]+", text.lower())
+    if len(words) < 4:
+        return False
+    english_score = sum(word in ENGLISH_MARKERS for word in words)
+    indonesian_score = sum(word in INDONESIAN_MARKERS for word in words)
+    if target_language.startswith('en-'):
+        return english_score >= 2 and english_score >= indonesian_score * 2
+    if target_language == 'id':
+        return indonesian_score >= 2 and indonesian_score >= english_score * 2
+    return False
+
+
+def translate_batch_with_retry(
+    batch_texts: List[str],
+    source_language: str,
+    target_language: str,
+    attempts: int = 3,
+) -> List[str]:
+    last_error = None
+    for attempt in range(attempts):
+        try:
+            return translate_batch(batch_texts, source_language, target_language)
+        except Exception as exc:
+            last_error = exc
+            if attempt + 1 < attempts:
+                time.sleep(0.6 * (2 ** attempt))
+    raise last_error
+
+
+def build_translation_batches(
+    items: List[Tuple[int, str, Dict[str, str], str]],
+) -> List[List[Tuple[int, str, Dict[str, str], str]]]:
+    batches = []
+    cursor = 0
+    while cursor < len(items):
+        batch = []
+        total_chars = 0
+        while cursor < len(items) and len(batch) < BATCH_SIZE:
+            item = items[cursor]
+            projected = total_chars + len(item[1]) + len(SEPARATOR)
+            if batch and projected > MAX_BATCH_CHARS:
+                break
+            batch.append(item)
+            total_chars = projected
+            cursor += 1
+        if not batch:
+            batch = [items[cursor]]
+            cursor += 1
+        batches.append(batch)
+    return batches
+
+
 def google_translate_paragraphs(
     texts: List[str],
     profile: str = 'academic',
@@ -395,7 +513,7 @@ def google_translate_paragraphs(
     target_language: str = 'en-GB',
 ) -> List[str]:
     results = [''] * len(texts)
-    to_translate: List[Tuple[int, str, Dict[str, str]]] = []
+    to_translate: List[Tuple[int, str, Dict[str, str], str]] = []
 
     for i, text in enumerate(texts):
         if text in translate_cache:
@@ -407,53 +525,65 @@ def google_translate_paragraphs(
             stats['skipped'] += 1
             continue
 
+        cache_key = translation_cache_key(text, source_language, target_language, profile, custom_words)
+        cached = persistent_cache_get(cache_key)
+        if cached is not None:
+            translate_cache[text] = cached
+            results[i] = cached
+            stats['cached'] += 1
+            continue
+
+        if already_in_target_language(text, source_language, target_language):
+            styled = apply_output_style(text, target_language, profile, custom_words)
+            translate_cache[text] = styled
+            results[i] = styled
+            persistent_cache_put(cache_key, styled)
+            stats['skipped'] += 1
+            continue
+
         protected_text, replacements = protect_terms(text, profile) if target_language.startswith('en-') else (text, {})
-        to_translate.append((i, protected_text, replacements))
+        to_translate.append((i, protected_text, replacements, cache_key))
 
-    cursor = 0
-    while cursor < len(to_translate):
-        batch: List[Tuple[int, str, Dict[str, str]]] = []
-        total_chars = 0
-        while cursor < len(to_translate) and len(batch) < BATCH_SIZE:
-            item = to_translate[cursor]
-            projected = total_chars + len(item[1]) + len(SEPARATOR)
-            if batch and projected > MAX_BATCH_CHARS:
-                break
-            batch.append(item)
-            total_chars = projected
-            cursor += 1
-
-        if not batch:
-            batch = [to_translate[cursor]]
-            cursor += 1
-
-        indices = [item[0] for item in batch]
-        batch_texts = [item[1] for item in batch]
-        replacements_list = [item[2] for item in batch]
-
-        try:
-            parts = translate_batch(batch_texts, source_language, target_language)
-            for idx, original_src, replacements, translated in zip(indices, batch_texts, replacements_list, parts):
-                restored = restore_terms(translated, replacements)
-                polished = apply_output_style(restored, target_language, profile, custom_words)
-                translate_cache[texts[idx]] = polished
-                results[idx] = polished
-                stats['translated'] += 1
-        except Exception:
-            # Fallback: translate paragraph by paragraph for better resilience.
-            for idx, original_src, replacements in zip(indices, batch_texts, replacements_list):
-                try:
-                    translated = _get_translator(source_language, target_language).translate(original_src)
+    batches = build_translation_batches(to_translate)
+    with ThreadPoolExecutor(max_workers=PARALLEL_WORKERS) as executor:
+        future_batches = {
+            executor.submit(
+                translate_batch_with_retry,
+                [item[1] for item in batch],
+                source_language,
+                target_language,
+            ): batch
+            for batch in batches
+        }
+        for future in as_completed(future_batches):
+            batch = future_batches[future]
+            try:
+                parts = future.result()
+                for (idx, _, replacements, cache_key), translated in zip(batch, parts):
                     restored = restore_terms(translated, replacements)
                     polished = apply_output_style(restored, target_language, profile, custom_words)
                     translate_cache[texts[idx]] = polished
                     results[idx] = polished
+                    persistent_cache_put(cache_key, polished)
                     stats['translated'] += 1
-                except Exception:
-                    results[idx] = texts[idx]
-                    stats['errors'] += 1
+            except Exception:
+                # Fallback per paragraph keeps one rejected batch from failing the document.
+                for idx, original_src, replacements, cache_key in batch:
+                    try:
+                        translated = translate_batch_with_retry(
+                            [original_src], source_language, target_language, attempts=2
+                        )[0]
+                        restored = restore_terms(translated, replacements)
+                        polished = apply_output_style(restored, target_language, profile, custom_words)
+                        translate_cache[texts[idx]] = polished
+                        results[idx] = polished
+                        persistent_cache_put(cache_key, polished)
+                        stats['translated'] += 1
+                    except Exception:
+                        results[idx] = texts[idx]
+                        stats['errors'] += 1
 
-        time.sleep(BATCH_DELAY)
+    persistent_cache_flush()
 
     return results
 
@@ -605,4 +735,5 @@ def translate_docx_v3(
         'profile': profile,
         'source_language': source_language,
         'target_language': target_language,
+        'parallel_workers': PARALLEL_WORKERS,
     }
