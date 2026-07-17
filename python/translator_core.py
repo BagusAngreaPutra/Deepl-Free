@@ -482,14 +482,29 @@ def translate_batch_with_retry(
     attempts: int = 3,
 ) -> List[str]:
     last_error = None
-    for attempt in range(attempts):
+    attempt = 0
+    maximum_attempts = attempts
+    while attempt < maximum_attempts:
         try:
             return translate_batch(batch_texts, source_language, target_language)
         except Exception as exc:
             last_error = exc
-            if attempt + 1 < attempts:
-                emit_progress('translation_batch_retry', attempt=attempt + 1, error=str(exc)[:300])
-                time.sleep(0.6 * (2 ** attempt))
+            # DNS on shared/local environments can disappear for several seconds.
+            # Give network failures a longer recovery window without delaying
+            # malformed-document or translation-content errors.
+            if is_translation_service_failure(exc):
+                maximum_attempts = max(maximum_attempts, 6)
+            attempt += 1
+            if attempt < maximum_attempts:
+                delay = min(12.0, 0.75 * (2 ** (attempt - 1)))
+                emit_progress(
+                    'translation_batch_retry',
+                    attempt=attempt,
+                    maximum_attempts=maximum_attempts,
+                    retry_in_seconds=delay,
+                    error=str(exc)[:300],
+                )
+                time.sleep(delay)
     raise last_error
 
 
