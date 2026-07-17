@@ -21,7 +21,48 @@
   </header>
 
   <main class="container">
-    <form id="translatorForm" class="workspace">
+    <nav class="mode-tabs" aria-label="Mode penerjemah">
+      <button type="button" class="mode-tab active" data-mode="text">Teks</button>
+      <button type="button" class="mode-tab" data-mode="document">Dokumen</button>
+    </nav>
+
+    <section id="textWorkspace" class="workspace text-workspace">
+      <div class="workspace-head">
+        <div><span class="section-label">TEXT TRANSLATOR</span><h1>Terjemahkan teks</h1></div>
+        <span class="file-limit">Maks. 5.000 karakter</span>
+      </div>
+      <div class="text-language-bar">
+        <select id="textSourceLanguage" aria-label="Bahasa sumber">
+          <option value="auto">Deteksi otomatis</option>
+          <option value="id">Indonesia</option><option value="en-US">English (United States)</option><option value="en-GB">English (British)</option>
+          <option value="de">Deutsch</option><option value="fr">Français</option><option value="es">Español</option><option value="pt">Português</option>
+          <option value="it">Italiano</option><option value="nl">Nederlands</option><option value="pl">Polski</option><option value="ru">Русский</option>
+          <option value="ar">العربية</option><option value="tr">Türkçe</option><option value="zh-CN">中文</option><option value="ja">日本語</option>
+          <option value="ko">한국어</option><option value="vi">Tiếng Việt</option><option value="th">ไทย</option><option value="ms">Bahasa Melayu</option>
+        </select>
+        <button type="button" class="swap-btn" id="swapTextLanguages" aria-label="Tukar bahasa">⇄</button>
+        <select id="textTargetLanguage" aria-label="Bahasa tujuan">
+          <option value="en-GB">English (British)</option><option value="en-US">English (United States)</option><option value="id">Indonesia</option>
+          <option value="de">Deutsch</option><option value="fr">Français</option><option value="es">Español</option><option value="pt">Português</option>
+          <option value="it">Italiano</option><option value="nl">Nederlands</option><option value="pl">Polski</option><option value="ru">Русский</option>
+          <option value="ar">العربية</option><option value="tr">Türkçe</option><option value="zh-CN">中文</option><option value="ja">日本語</option>
+          <option value="ko">한국어</option><option value="vi">Tiếng Việt</option><option value="th">ไทย</option><option value="ms">Bahasa Melayu</option>
+        </select>
+      </div>
+      <div class="text-panels">
+        <div class="text-panel input-panel">
+          <textarea id="sourceText" maxlength="5000" placeholder="Ketik atau tempel teks di sini" autofocus></textarea>
+          <div class="text-panel-foot"><button type="button" class="panel-action" id="clearText">Hapus</button><span id="characterCount">0 / 5.000</span></div>
+        </div>
+        <div class="text-panel output-panel">
+          <textarea id="translatedText" placeholder="Hasil terjemahan" readonly></textarea>
+          <div class="text-panel-foot"><span id="textStatus">Siap menerjemahkan</span><button type="button" class="panel-action" id="copyTranslation" disabled>Salin</button></div>
+        </div>
+      </div>
+      <button type="button" class="primary-btn text-translate-btn" id="translateTextBtn" disabled>Terjemahkan</button>
+    </section>
+
+    <form id="translatorForm" class="workspace hidden">
       @csrf
       <div class="workspace-head">
         <div><span class="section-label">DOCUMENT TRANSLATOR</span><h1>Terjemahkan dokumen</h1></div>

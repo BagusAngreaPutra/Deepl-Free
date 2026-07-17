@@ -98,9 +98,10 @@ def overlay_text_on_image(image_path: str, ocr_results: list, translated_texts: 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument('operation', choices=['docx', 'pdf', 'ocr'])
-    parser.add_argument('--input', required=True)
-    parser.add_argument('--output', required=True)
+    parser.add_argument('operation', choices=['docx', 'pdf', 'ocr', 'text'])
+    parser.add_argument('--input')
+    parser.add_argument('--output')
+    parser.add_argument('--text', default='')
     parser.add_argument('--profile', default='academic')
     parser.add_argument('--custom-words', default='')
     languages = [
@@ -114,6 +115,22 @@ def main() -> None:
     worker_lock = acquire_worker_lock()
     custom_raw = base64.b64decode(args.custom_words).decode('utf-8') if args.custom_words else ''
     custom_words = parse_custom_words(custom_raw)
+
+    if args.operation == 'text':
+        if not args.text:
+            raise ValueError('Teks belum diberikan.')
+        source_text = base64.b64decode(args.text).decode('utf-8')
+        translated = google_translate_paragraphs(
+            [source_text],
+            profile=args.profile,
+            custom_words=custom_words,
+            source_language=args.source_language,
+            target_language=args.target_language,
+        )[0]
+        emit({'ok': True, 'translation': translated})
+
+    if not args.input or not args.output:
+        raise ValueError('Path input dan output wajib diberikan.')
 
     if args.operation == 'docx':
         summary = translate_docx_v3(

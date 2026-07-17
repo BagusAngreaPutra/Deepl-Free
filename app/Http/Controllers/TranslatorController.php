@@ -40,6 +40,46 @@ class TranslatorController extends Controller
         return response()->json(['status' => 'ok']);
     }
 
+    public function translateText(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'text' => ['required', 'string', 'max:5000'],
+            'source_language' => ['nullable', 'in:'.implode(',', self::SOURCE_LANGUAGES)],
+            'target_language' => ['required', 'in:'.implode(',', self::TARGET_LANGUAGES)],
+        ], [
+            'text.required' => 'Masukkan teks yang ingin diterjemahkan.',
+            'text.max' => 'Teks maksimal 5.000 karakter.',
+        ]);
+
+        $requestId = (string) Str::uuid();
+        Log::info('text_translation.request_received', [
+            'request_id' => $requestId,
+            'characters' => mb_strlen($validated['text']),
+            'source_language' => $validated['source_language'] ?? 'auto',
+            'target_language' => $validated['target_language'],
+        ]);
+
+        try {
+            $payload = $this->worker->run('text', [
+                '--text', base64_encode($validated['text']),
+                '--source-language', $validated['source_language'] ?? 'auto',
+                '--target-language', $validated['target_language'],
+                '--profile', self::DEFAULT_PROFILE,
+            ], $requestId);
+
+            return response()->json([
+                'translation' => $payload['translation'],
+                'request_id' => $requestId,
+            ]);
+        } catch (Throwable $e) {
+            Log::error('text_translation.failed', ['request_id' => $requestId, 'exception' => $e]);
+            return response()->json([
+                'error' => 'Terjemahan teks gagal: '.$e->getMessage(),
+                'error_id' => $requestId,
+            ], 500);
+        }
+    }
+
     public function translate(Request $request): JsonResponse|BinaryFileResponse
     {
         $requestId = (string) Str::uuid();

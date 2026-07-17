@@ -18,11 +18,83 @@ const targetLanguage = document.getElementById('targetLanguage');
 const pdfOptionsModal = document.getElementById('pdfOptionsModal');
 const pdfOptionList = document.getElementById('pdfOptionList');
 const confirmPdfOptions = document.getElementById('confirmPdfOptions');
+const textWorkspace = document.getElementById('textWorkspace');
+const sourceText = document.getElementById('sourceText');
+const translatedText = document.getElementById('translatedText');
+const textSourceLanguage = document.getElementById('textSourceLanguage');
+const textTargetLanguage = document.getElementById('textTargetLanguage');
+const translateTextBtn = document.getElementById('translateTextBtn');
+const copyTranslation = document.getElementById('copyTranslation');
+const textStatus = document.getElementById('textStatus');
 
 let items = [];
 let running = false;
 let audioContext;
 let pendingPdfIds = [];
+
+document.querySelectorAll('.mode-tab').forEach((tab) => tab.addEventListener('click', () => {
+  document.querySelectorAll('.mode-tab').forEach((candidate) => candidate.classList.toggle('active', candidate === tab));
+  const textMode = tab.dataset.mode === 'text';
+  textWorkspace.classList.toggle('hidden', !textMode);
+  form.classList.toggle('hidden', textMode);
+}));
+
+sourceText.addEventListener('input', () => {
+  document.getElementById('characterCount').textContent = `${sourceText.value.length.toLocaleString('id-ID')} / 5.000`;
+  translateTextBtn.disabled = !sourceText.value.trim();
+});
+
+document.getElementById('clearText').addEventListener('click', () => {
+  sourceText.value = '';
+  translatedText.value = '';
+  sourceText.dispatchEvent(new Event('input'));
+  copyTranslation.disabled = true;
+  textStatus.textContent = 'Siap menerjemahkan';
+  sourceText.focus();
+});
+
+document.getElementById('swapTextLanguages').addEventListener('click', () => {
+  const oldSource = textSourceLanguage.value;
+  textSourceLanguage.value = textTargetLanguage.value;
+  textTargetLanguage.value = oldSource === 'auto' ? 'id' : oldSource;
+  if (translatedText.value) {
+    const oldText = sourceText.value;
+    sourceText.value = translatedText.value;
+    translatedText.value = oldText;
+    sourceText.dispatchEvent(new Event('input'));
+  }
+});
+
+translateTextBtn.addEventListener('click', async () => {
+  const text = sourceText.value.trim();
+  if (!text || translateTextBtn.disabled) return;
+  translateTextBtn.disabled = true;
+  translateTextBtn.textContent = 'Menerjemahkan…';
+  textStatus.textContent = 'Sedang menerjemahkan';
+  try {
+    const response = await fetch('/translate-text', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrfToken},
+      body: JSON.stringify({text, source_language: textSourceLanguage.value, target_language: textTargetLanguage.value}),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || Object.values(data.errors || {}).flat()[0] || 'Terjemahan gagal');
+    translatedText.value = data.translation;
+    copyTranslation.disabled = false;
+    textStatus.textContent = 'Terjemahan selesai';
+  } catch (error) {
+    textStatus.textContent = 'Terjemahan gagal';
+    showToast('Terjemahan gagal', error.message);
+  } finally {
+    translateTextBtn.disabled = !sourceText.value.trim();
+    translateTextBtn.textContent = 'Terjemahkan';
+  }
+});
+
+copyTranslation.addEventListener('click', async () => {
+  await navigator.clipboard.writeText(translatedText.value);
+  textStatus.textContent = 'Hasil disalin';
+});
 
 document.getElementById('swapLanguages').addEventListener('click', () => {
   if (sourceLanguage.value === 'auto') {

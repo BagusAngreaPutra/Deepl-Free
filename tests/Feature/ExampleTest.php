@@ -18,6 +18,8 @@ class ExampleTest extends TestCase
         $response->assertSee('Pilih atau tarik file DOCX dan PDF ke sini');
         $response->assertSee('multiple hidden', false);
         $response->assertSee('JDS Trasnlator');
+        $response->assertSee('Terjemahkan teks');
+        $response->assertSee('id="sourceText"', false);
         $response->assertDontSee('Gaya hasil');
         $response->assertSee('English (United States)');
         $response->assertSee('English (British)');
@@ -38,6 +40,21 @@ class ExampleTest extends TestCase
         $this->post('/translate', [], ['Accept' => 'application/json'])
             ->assertStatus(422)
             ->assertJsonValidationErrors('docx_file');
+    }
+
+    public function test_text_translate_validates_text_and_languages(): void
+    {
+        $this->post('/translate-text', [], ['Accept' => 'application/json'])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['text', 'target_language']);
+
+        $this->post('/translate-text', [
+            'text' => 'Halo',
+            'source_language' => 'unknown',
+            'target_language' => 'unknown',
+        ], ['Accept' => 'application/json'])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['source_language', 'target_language']);
     }
 
     public function test_ocr_requires_an_image_as_json(): void
