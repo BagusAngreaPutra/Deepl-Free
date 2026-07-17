@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -13,6 +14,31 @@ from translator_core import (
     translate_docx_v3,
     translate_pdf,
 )
+
+
+def acquire_worker_lock():
+    lock_path = Path('storage/app/private/translator-worker.lock').resolve()
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    handle = open(lock_path, 'a+b')
+    if os.name == 'nt':
+        import msvcrt
+        if lock_path.stat().st_size == 0:
+            handle.write(b'0')
+            handle.flush()
+        handle.seek(0)
+        try:
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        except OSError as exc:
+            handle.close()
+            raise RuntimeError('Dokumen lain masih diproses. Tunggu hingga proses sebelumnya selesai.') from exc
+    else:
+        import fcntl
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            handle.close()
+            raise RuntimeError('Dokumen lain masih diproses. Tunggu hingga proses sebelumnya selesai.') from exc
+    return handle
 
 
 def emit(payload: dict, status: int = 0) -> None:
@@ -85,6 +111,7 @@ def main() -> None:
     parser.add_argument('--target-language', default='en-GB', choices=languages)
     parser.add_argument('--output-format', default='pdf', choices=['pdf', 'docx'])
     args = parser.parse_args()
+    worker_lock = acquire_worker_lock()
     custom_raw = base64.b64decode(args.custom_words).decode('utf-8') if args.custom_words else ''
     custom_words = parse_custom_words(custom_raw)
 

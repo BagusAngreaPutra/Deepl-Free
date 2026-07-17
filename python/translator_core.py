@@ -493,6 +493,16 @@ def translate_batch_with_retry(
     raise last_error
 
 
+def is_translation_service_failure(error: Exception) -> bool:
+    message = str(error).lower()
+    markers = (
+        'failed to resolve', 'nameresolutionerror', 'getaddrinfo failed',
+        'connection refused', 'connection aborted', 'network is unreachable',
+        'too many requests', '429 client error',
+    )
+    return any(marker in message for marker in markers)
+
+
 def build_translation_batches(
     items: List[Tuple[int, str, Dict[str, str], str]],
 ) -> List[List[Tuple[int, str, Dict[str, str], str]]]:
@@ -565,6 +575,7 @@ def google_translate_paragraphs(
         skipped=stats['skipped'],
     )
     completed_batches = 0
+    service_failure = None
     with ThreadPoolExecutor(max_workers=PARALLEL_WORKERS) as executor:
         future_batches = {
             executor.submit(
@@ -586,7 +597,12 @@ def google_translate_paragraphs(
                     results[idx] = polished
                     persistent_cache_put(cache_key, polished)
                     stats['translated'] += 1
-            except Exception:
+            except Exception as batch_error:
+                if is_translation_service_failure(batch_error):
+                    service_failure = batch_error
+                    for pending in future_batches:
+                        pending.cancel()
+                    break
                 # Fallback per paragraph keeps one rejected batch from failing the document.
                 for idx, original_src, replacements, cache_key in batch:
                     try:
@@ -613,6 +629,13 @@ def google_translate_paragraphs(
                     translated=stats['translated'],
                     errors=stats['errors'],
                 )
+
+    if service_failure is not None:
+        emit_progress('translation_service_unavailable', error=str(service_failure)[:500])
+        raise RuntimeError(
+            'Layanan terjemahan tidak dapat dihubungi. Periksa koneksi internet atau DNS, '
+            'lalu coba kembali beberapa saat lagi.'
+        ) from service_failure
 
     persistent_cache_flush()
 
