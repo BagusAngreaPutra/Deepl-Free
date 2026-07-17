@@ -186,21 +186,23 @@ class TranslatorController extends Controller
         ]);
 
         $file = $request->file('pdf_file');
+        $originalName = $file->getClientOriginalName();
+        $fileSize = $file->getSize();
         $token = Str::lower(Str::random(10));
         $directory = storage_path('app/private/translator');
         if (!is_dir($directory)) mkdir($directory, 0775, true);
         $input = $directory.DIRECTORY_SEPARATOR.$token.'_input.pdf';
         $outputFormat = $request->string('output_format')->value();
         $output = $directory.DIRECTORY_SEPARATOR.$token.'_output.'.$outputFormat;
-        $stem = pathinfo($file->getClientOriginalName(), PATHINFO_FILENAME) ?: 'document';
+        $stem = pathinfo($originalName, PATHINFO_FILENAME) ?: 'document';
         $targetLanguage = $request->string('target_language')->value() ?: 'en-GB';
         $downloadName = $stem.' '.$targetLanguage.'.'.$outputFormat;
         $file->move($directory, basename($input));
 
         Log::info('pdf_translation.input_stored', [
             'request_id' => $requestId,
-            'original_name' => $file->getClientOriginalName(),
-            'size_bytes' => $file->getSize(),
+            'original_name' => $originalName,
+            'size_bytes' => $fileSize,
             'output_format' => $outputFormat,
             'input_exists' => is_file($input),
         ]);
