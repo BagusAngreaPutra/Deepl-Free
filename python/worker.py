@@ -77,8 +77,12 @@ def main() -> None:
     parser.add_argument('--output', required=True)
     parser.add_argument('--profile', default='academic')
     parser.add_argument('--custom-words', default='')
-    parser.add_argument('--source-language', default='auto', choices=['auto', 'id', 'en-US', 'en-GB'])
-    parser.add_argument('--target-language', default='en-GB', choices=['id', 'en-US', 'en-GB'])
+    languages = [
+        'id', 'en-US', 'en-GB', 'de', 'fr', 'es', 'pt', 'it', 'nl', 'pl',
+        'ru', 'ar', 'tr', 'zh-CN', 'ja', 'ko', 'vi', 'th', 'ms',
+    ]
+    parser.add_argument('--source-language', default='auto', choices=['auto', *languages])
+    parser.add_argument('--target-language', default='en-GB', choices=languages)
     parser.add_argument('--output-format', default='pdf', choices=['pdf', 'docx'])
     args = parser.parse_args()
     custom_raw = base64.b64decode(args.custom_words).decode('utf-8') if args.custom_words else ''

@@ -13,8 +13,14 @@ use Throwable;
 class TranslatorController extends Controller
 {
     private const DEFAULT_PROFILE = 'academic';
-    private const SOURCE_LANGUAGES = ['auto', 'id', 'en-US', 'en-GB'];
-    private const TARGET_LANGUAGES = ['id', 'en-US', 'en-GB'];
+    private const SOURCE_LANGUAGES = [
+        'auto', 'id', 'en-US', 'en-GB', 'de', 'fr', 'es', 'pt', 'it', 'nl',
+        'pl', 'ru', 'ar', 'tr', 'zh-CN', 'ja', 'ko', 'vi', 'th', 'ms',
+    ];
+    private const TARGET_LANGUAGES = [
+        'id', 'en-US', 'en-GB', 'de', 'fr', 'es', 'pt', 'it', 'nl', 'pl',
+        'ru', 'ar', 'tr', 'zh-CN', 'ja', 'ko', 'vi', 'th', 'ms',
+    ];
 
     private const PROFILES = [
         'standard' => ['label' => 'Standard British English', 'description' => 'General British spelling and light polishing.'],

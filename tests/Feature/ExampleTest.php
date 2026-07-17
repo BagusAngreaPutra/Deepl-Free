@@ -21,6 +21,8 @@ class ExampleTest extends TestCase
         $response->assertDontSee('Gaya hasil');
         $response->assertSee('English (United States)');
         $response->assertSee('English (British)');
+        $response->assertSee('Deutsch (Jerman)');
+        $response->assertSee('中文 (Mandarin Sederhana)');
         $response->assertDontSee('Tambahkan kamus khusus');
     }
 

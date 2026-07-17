@@ -44,6 +44,22 @@
             <option value="id">Indonesia</option>
             <option value="en-US">English (United States)</option>
             <option value="en-GB">English (British)</option>
+            <option value="de">Deutsch (Jerman)</option>
+            <option value="fr">Français (Prancis)</option>
+            <option value="es">Español (Spanyol)</option>
+            <option value="pt">Português (Portugis)</option>
+            <option value="it">Italiano</option>
+            <option value="nl">Nederlands (Belanda)</option>
+            <option value="pl">Polski (Polandia)</option>
+            <option value="ru">Русский (Rusia)</option>
+            <option value="ar">العربية (Arab)</option>
+            <option value="tr">Türkçe (Turki)</option>
+            <option value="zh-CN">中文 (Mandarin Sederhana)</option>
+            <option value="ja">日本語 (Jepang)</option>
+            <option value="ko">한국어 (Korea)</option>
+            <option value="vi">Tiếng Việt</option>
+            <option value="th">ไทย (Thailand)</option>
+            <option value="ms">Bahasa Melayu</option>
           </select>
         </div>
         <button type="button" class="swap-btn" id="swapLanguages" aria-label="Tukar bahasa" title="Tukar bahasa">⇄</button>
@@ -53,6 +69,22 @@
             <option value="en-GB">English (British)</option>
             <option value="en-US">English (United States)</option>
             <option value="id">Indonesia</option>
+            <option value="de">Deutsch (Jerman)</option>
+            <option value="fr">Français (Prancis)</option>
+            <option value="es">Español (Spanyol)</option>
+            <option value="pt">Português (Portugis)</option>
+            <option value="it">Italiano</option>
+            <option value="nl">Nederlands (Belanda)</option>
+            <option value="pl">Polski (Polandia)</option>
+            <option value="ru">Русский (Rusia)</option>
+            <option value="ar">العربية (Arab)</option>
+            <option value="tr">Türkçe (Turki)</option>
+            <option value="zh-CN">中文 (Mandarin Sederhana)</option>
+            <option value="ja">日本語 (Jepang)</option>
+            <option value="ko">한국어 (Korea)</option>
+            <option value="vi">Tiếng Việt</option>
+            <option value="th">ไทย (Thailand)</option>
+            <option value="ms">Bahasa Melayu</option>
           </select>
         </div>
       </div>
