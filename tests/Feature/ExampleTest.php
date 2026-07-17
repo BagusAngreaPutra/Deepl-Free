@@ -15,7 +15,7 @@ class ExampleTest extends TestCase
         $response = $this->get('/');
 
         $response->assertStatus(200);
-        $response->assertSee('Pilih atau tarik file DOCX ke sini');
+        $response->assertSee('Pilih atau tarik file DOCX dan PDF ke sini');
         $response->assertSee('multiple hidden', false);
         $response->assertSee('JDS Trasnlator');
         $response->assertDontSee('Gaya hasil');
@@ -43,5 +43,12 @@ class ExampleTest extends TestCase
         $this->post('/ocr-translate', [], ['Accept' => 'application/json'])
             ->assertStatus(422)
             ->assertJsonValidationErrors('image_file');
+    }
+
+    public function test_pdf_translate_requires_a_pdf_and_output_format(): void
+    {
+        $this->post('/translate-pdf', [], ['Accept' => 'application/json'])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['pdf_file', 'output_format']);
     }
 }

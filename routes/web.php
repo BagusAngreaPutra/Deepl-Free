@@ -10,4 +10,5 @@ Route::get('/brand-logo', fn () => response()->file(
 ))->name('brand.logo');
 Route::get('/health', [TranslatorController::class, 'health'])->name('health');
 Route::post('/translate', [TranslatorController::class, 'translate'])->name('translate');
+Route::post('/translate-pdf', [TranslatorController::class, 'translatePdf'])->name('translate.pdf');
 Route::post('/ocr-translate', [TranslatorController::class, 'ocrTranslate'])->name('ocr.translate');

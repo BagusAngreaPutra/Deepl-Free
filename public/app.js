@@ -15,10 +15,14 @@ const fileList = document.getElementById('fileList');
 const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
 const sourceLanguage = document.getElementById('sourceLanguage');
 const targetLanguage = document.getElementById('targetLanguage');
+const pdfOptionsModal = document.getElementById('pdfOptionsModal');
+const pdfOptionList = document.getElementById('pdfOptionList');
+const confirmPdfOptions = document.getElementById('confirmPdfOptions');
 
 let items = [];
 let running = false;
 let audioContext;
+let pendingPdfIds = [];
 
 document.getElementById('swapLanguages').addEventListener('click', () => {
   if (sourceLanguage.value === 'auto') {
@@ -62,20 +66,61 @@ function addFiles(fileCollection) {
   if (running) return;
   const incoming = [...fileCollection];
   let rejected = 0;
+  const addedPdfs = [];
   for (const file of incoming) {
-    const isDocx = file.name.toLowerCase().endsWith('.docx');
+    const extension = file.name.toLowerCase().split('.').pop();
+    const isSupported = ['docx', 'pdf'].includes(extension);
     const isWithinLimit = file.size <= 25 * 1024 * 1024;
     const duplicate = items.some((item) => item.file.name === file.name && item.file.size === file.size);
-    if (!isDocx || !isWithinLimit || duplicate) {
+    if (!isSupported || !isWithinLimit || duplicate) {
       rejected += 1;
       continue;
     }
-    items.push({ id: crypto.randomUUID(), file, state: 'waiting', progress: 0, message: 'Menunggu' });
+    const item = {
+      id: crypto.randomUUID(), file, type: extension, outputFormat: extension === 'pdf' ? 'pdf' : 'docx',
+      state: 'waiting', progress: 0, message: 'Menunggu',
+    };
+    items.push(item);
+    if (extension === 'pdf') addedPdfs.push(item);
   }
   fileInput.value = '';
   render();
-  if (rejected) showToast('Sebagian file tidak ditambahkan', `${rejected} file duplikat, bukan DOCX, atau melebihi 25 MB.`);
+  if (addedPdfs.length) openPdfOptions(addedPdfs);
+  if (rejected) showToast('Sebagian file tidak ditambahkan', `${rejected} file duplikat, formatnya bukan DOCX/PDF, atau melebihi 25 MB.`);
 }
+
+function openPdfOptions(pdfItems) {
+  pendingPdfIds = pdfItems.map((item) => item.id);
+  pdfOptionList.replaceChildren(...pdfItems.map((item) => {
+    const row = document.createElement('div');
+    row.className = 'pdf-option-row';
+    row.dataset.id = item.id;
+    row.innerHTML = `
+      <div><strong></strong><span></span></div>
+      <div class="format-switch" role="group" aria-label="Format hasil">
+        <button type="button" data-format="pdf" class="active">PDF</button>
+        <button type="button" data-format="docx">DOCX</button>
+      </div>`;
+    row.querySelector('strong').textContent = item.file.name;
+    row.querySelector('span').textContent = formatBytes(item.file.size);
+    row.querySelectorAll('.format-switch button').forEach((button) => button.addEventListener('click', () => {
+      row.querySelectorAll('.format-switch button').forEach((candidate) => candidate.classList.remove('active'));
+      button.classList.add('active');
+    }));
+    return row;
+  }));
+  pdfOptionsModal.classList.remove('hidden');
+}
+
+confirmPdfOptions.addEventListener('click', () => {
+  pdfOptionList.querySelectorAll('.pdf-option-row').forEach((row) => {
+    const item = items.find((candidate) => candidate.id === row.dataset.id);
+    if (item) item.outputFormat = row.querySelector('.format-switch button.active').dataset.format;
+  });
+  pendingPdfIds = [];
+  pdfOptionsModal.classList.add('hidden');
+  render();
+});
 
 function render() {
   const hasItems = items.length > 0;
@@ -106,7 +151,7 @@ function createFileRow(item) {
   const row = document.createElement('article');
   row.className = `file-row ${item.state}`;
   row.innerHTML = `
-    <div class="file-badge">DOCX</div>
+    <div class="file-badge"></div>
     <div class="file-main">
       <div class="file-meta"><strong></strong><span></span></div>
       <div class="progress-track"><span></span></div>
@@ -114,9 +159,11 @@ function createFileRow(item) {
     </div>
     <div class="file-actions"></div>`;
   row.querySelector('.file-meta strong').textContent = item.file.name;
+  row.querySelector('.file-badge').textContent = item.type.toUpperCase();
   row.querySelector('.file-meta span').textContent = formatBytes(item.file.size);
   row.querySelector('.progress-track span').style.width = `${item.progress}%`;
-  row.querySelector('small').textContent = `${item.progress}% · ${item.message}`;
+  const formatLabel = item.type === 'pdf' ? `Hasil ${item.outputFormat.toUpperCase()} · ` : '';
+  row.querySelector('small').textContent = `${formatLabel}${item.progress}% · ${item.message}`;
   const actions = row.querySelector('.file-actions');
 
   if (item.state === 'done' && item.downloadUrl) {
@@ -167,13 +214,14 @@ function processFile(item) {
   item.state = 'uploading'; item.message = 'Mengunggah'; render();
   const data = new FormData();
   data.append('_token', csrfToken);
-  data.append('docx_file', item.file);
+  data.append(item.type === 'pdf' ? 'pdf_file' : 'docx_file', item.file);
+  if (item.type === 'pdf') data.append('output_format', item.outputFormat);
   data.append('source_language', sourceLanguage.value);
   data.append('target_language', targetLanguage.value);
 
   return new Promise((resolve) => {
     const xhr = new XMLHttpRequest();
-    xhr.open('POST', '/translate');
+    xhr.open('POST', item.type === 'pdf' ? '/translate-pdf' : '/translate');
     xhr.responseType = 'blob';
     xhr.setRequestHeader('X-CSRF-TOKEN', csrfToken);
     xhr.upload.onprogress = (event) => {
@@ -189,7 +237,8 @@ function processFile(item) {
       if (xhr.status >= 200 && xhr.status < 300) {
         item.state = 'done'; item.progress = 100; item.message = 'Selesai';
         item.downloadUrl = URL.createObjectURL(xhr.response);
-        item.downloadName = getFilename(xhr.getResponseHeader('Content-Disposition')) || `${stripExtension(item.file.name)} ${targetLanguage.value}.docx`;
+        const outputExtension = item.type === 'pdf' ? item.outputFormat : 'docx';
+        item.downloadName = getFilename(xhr.getResponseHeader('Content-Disposition')) || `${stripExtension(item.file.name)} ${targetLanguage.value}.${outputExtension}`;
         render();
         downloadResult(item);
       } else {
@@ -271,7 +320,7 @@ function showToast(title, message) {
 }
 
 function releaseDownload(item) { if (item.downloadUrl) URL.revokeObjectURL(item.downloadUrl); }
-function stripExtension(name) { return name.replace(/\.docx$/i, ''); }
+function stripExtension(name) { return name.replace(/\.(docx|pdf)$/i, ''); }
 function getFilename(header = '') {
   const utf = header.match(/filename\*=UTF-8''([^;]+)/i);
   if (utf) return decodeURIComponent(utf[1]);

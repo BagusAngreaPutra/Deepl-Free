@@ -24,15 +24,15 @@
     <form id="translatorForm" class="workspace">
       @csrf
       <div class="workspace-head">
-        <div><span class="section-label">DOCX TRANSLATOR</span><h1>Terjemahkan dokumen</h1></div>
+        <div><span class="section-label">DOCUMENT TRANSLATOR</span><h1>Terjemahkan dokumen</h1></div>
         <span class="file-limit">Maks. 25 MB / file</span>
       </div>
 
       <label class="upload-zone" id="uploadZone">
-        <input type="file" id="docxFile" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" multiple hidden>
+        <input type="file" id="docxFile" accept=".docx,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" multiple hidden>
         <span class="upload-icon" aria-hidden="true">↑</span>
-        <strong>Pilih atau tarik file DOCX ke sini</strong>
-        <span>Bisa memilih beberapa dokumen sekaligus</span>
+        <strong>Pilih atau tarik file DOCX dan PDF ke sini</strong>
+        <span>Bisa mencampur beberapa dokumen sekaligus</span>
         <button type="button" class="choose-btn" id="chooseBtn">Pilih file</button>
       </label>
 
@@ -74,6 +74,19 @@
       <p class="form-note">Hasil otomatis diunduh. Biarkan halaman tetap terbuka selama proses berlangsung.</p>
     </form>
   </main>
+
+  <div class="modal-backdrop hidden" id="pdfOptionsModal" role="dialog" aria-modal="true" aria-labelledby="pdfModalTitle">
+    <div class="modal-card">
+      <div class="modal-icon">PDF</div>
+      <div class="modal-copy">
+        <span class="section-label">FORMAT HASIL</span>
+        <h2 id="pdfModalTitle">Pilih hasil untuk file PDF</h2>
+        <p>Setiap PDF dapat diterjemahkan kembali sebagai PDF atau dikonversi menjadi DOCX yang dapat diedit.</p>
+      </div>
+      <div class="pdf-option-list" id="pdfOptionList"></div>
+      <button type="button" class="primary-btn modal-confirm" id="confirmPdfOptions">Gunakan pilihan</button>
+    </div>
+  </div>
 
   <div class="toast hidden" id="toast" role="status"><strong id="toastTitle"></strong><span id="toastMessage"></span></div>
   <script src="{{ asset('app.js') }}"></script>

@@ -162,4 +162,88 @@ class TranslatorController extends Controller
             @unlink($input);
         }
     }
+
+    public function translatePdf(Request $request): JsonResponse|BinaryFileResponse
+    {
+        $requestId = (string) Str::uuid();
+        $startedAt = microtime(true);
+        Log::info('pdf_translation.request_received', [
+            'request_id' => $requestId,
+            'content_length' => $request->server('CONTENT_LENGTH'),
+            'output_format' => $request->input('output_format', 'pdf'),
+        ]);
+
+        $request->validate([
+            'pdf_file' => ['required', 'file', 'mimes:pdf', 'max:'.config('translator.max_upload_kb')],
+            'output_format' => ['required', 'in:pdf,docx'],
+            'source_language' => ['nullable', 'in:'.implode(',', self::SOURCE_LANGUAGES)],
+            'target_language' => ['nullable', 'in:'.implode(',', self::TARGET_LANGUAGES)],
+        ], [
+            'pdf_file.required' => 'File PDF belum dipilih.',
+            'pdf_file.mimes' => 'Format file harus .pdf',
+            'pdf_file.max' => 'Ukuran file maksimal 25 MB.',
+            'output_format.in' => 'Hasil PDF harus dipilih sebagai PDF atau DOCX.',
+        ]);
+
+        $file = $request->file('pdf_file');
+        $token = Str::lower(Str::random(10));
+        $directory = storage_path('app/private/translator');
+        if (!is_dir($directory)) mkdir($directory, 0775, true);
+        $input = $directory.DIRECTORY_SEPARATOR.$token.'_input.pdf';
+        $outputFormat = $request->string('output_format')->value();
+        $output = $directory.DIRECTORY_SEPARATOR.$token.'_output.'.$outputFormat;
+        $stem = pathinfo($file->getClientOriginalName(), PATHINFO_FILENAME) ?: 'document';
+        $targetLanguage = $request->string('target_language')->value() ?: 'en-GB';
+        $downloadName = $stem.' '.$targetLanguage.'.'.$outputFormat;
+        $file->move($directory, basename($input));
+
+        Log::info('pdf_translation.input_stored', [
+            'request_id' => $requestId,
+            'original_name' => $file->getClientOriginalName(),
+            'size_bytes' => $file->getSize(),
+            'output_format' => $outputFormat,
+            'input_exists' => is_file($input),
+        ]);
+
+        try {
+            $result = $this->worker->run('pdf', [
+                '--input', $input,
+                '--output', $output,
+                '--output-format', $outputFormat,
+                '--profile', self::DEFAULT_PROFILE,
+                '--source-language', $request->string('source_language')->value() ?: 'auto',
+                '--target-language', $targetLanguage,
+            ], $requestId);
+            $summary = $result['summary'];
+            Log::info('pdf_translation.completed', [
+                'request_id' => $requestId,
+                'elapsed_seconds' => round(microtime(true) - $startedAt, 3),
+                'output_size_bytes' => is_file($output) ? filesize($output) : null,
+                'summary' => $summary,
+            ]);
+
+            $contentType = $outputFormat === 'pdf'
+                ? 'application/pdf'
+                : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+            return response()->download($output, $downloadName, [
+                'Content-Type' => $contentType,
+                'X-Request-ID' => $requestId,
+                'X-Elapsed-Seconds' => number_format($summary['elapsed_seconds'] ?? 0, 1, '.', ''),
+                'X-Output-Format' => $outputFormat,
+            ])->deleteFileAfterSend(true);
+        } catch (Throwable $e) {
+            @unlink($output);
+            Log::error('pdf_translation.failed', [
+                'request_id' => $requestId,
+                'elapsed_seconds' => round(microtime(true) - $startedAt, 3),
+                'exception' => $e,
+            ]);
+            return response()->json([
+                'error' => 'Terjadi kesalahan saat memproses PDF: '.$e->getMessage(),
+                'error_id' => $requestId,
+            ], 500, ['X-Request-ID' => $requestId]);
+        } finally {
+            @unlink($input);
+        }
+    }
 }

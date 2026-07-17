@@ -5,6 +5,8 @@ Migrasi Laravel dari aplikasi Flask di folder induk. Laravel menangani halaman w
 ## Fitur
 
 - Penerjemahan DOCX termasuk body, header, footer, footnotes, endnotes, dan comments.
+- Penerjemahan PDF berbasis teks dengan pilihan hasil PDF atau konversi ke DOCX.
+- Antrean campuran beberapa PDF dan DOCX dengan pilihan format terpisah untuk setiap PDF.
 - Google Translate, kamus British English bawaan, academic polishing, dan tiga profil hasil.
 - OCR JPG/PNG/WEBP/TIFF (Bahasa Indonesia + Inggris), penerjemahan, dan overlay hasil ke PNG.
 - Batas upload 25 MB, statistik proses melalui response header, health endpoint, dan pembersihan file sementara.
@@ -45,6 +47,10 @@ php artisan serve
 Buka `http://127.0.0.1:8000`. Endpoint kesehatan tersedia di `/health`.
 
 EasyOCR mengunduh model pertama kali digunakan (sekitar 200 MB). Untuk produksi, pastikan PHP mengizinkan upload 25 MB (`upload_max_filesize` dan `post_max_size`) dan proses web memiliki hak tulis ke `storage`.
+
+PDF hasil scan yang tidak memiliki lapisan teks belum diproses oleh konverter PDF;
+jalankan OCR terlebih dahulu. Hasil PDF berusaha mempertahankan posisi blok teks,
+sedangkan hasil DOCX berfokus pada teks yang dapat diedit dan pemisahan halaman.
 
 ## Pengujian
 

@@ -11,6 +11,7 @@ from translator_core import (
     google_translate_paragraphs,
     parse_custom_words,
     translate_docx_v3,
+    translate_pdf,
 )
 
 
@@ -71,13 +72,14 @@ def overlay_text_on_image(image_path: str, ocr_results: list, translated_texts: 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument('operation', choices=['docx', 'ocr'])
+    parser.add_argument('operation', choices=['docx', 'pdf', 'ocr'])
     parser.add_argument('--input', required=True)
     parser.add_argument('--output', required=True)
     parser.add_argument('--profile', default='academic')
     parser.add_argument('--custom-words', default='')
     parser.add_argument('--source-language', default='auto', choices=['auto', 'id', 'en-US', 'en-GB'])
     parser.add_argument('--target-language', default='en-GB', choices=['id', 'en-US', 'en-GB'])
+    parser.add_argument('--output-format', default='pdf', choices=['pdf', 'docx'])
     args = parser.parse_args()
     custom_raw = base64.b64decode(args.custom_words).decode('utf-8') if args.custom_words else ''
     custom_words = parse_custom_words(custom_raw)
@@ -86,6 +88,18 @@ def main() -> None:
         summary = translate_docx_v3(
             args.input,
             args.output,
+            custom_words=custom_words,
+            profile=args.profile,
+            source_language=args.source_language,
+            target_language=args.target_language,
+        )
+        emit({'ok': True, 'summary': summary})
+
+    if args.operation == 'pdf':
+        summary = translate_pdf(
+            args.input,
+            args.output,
+            output_format=args.output_format,
             custom_words=custom_words,
             profile=args.profile,
             source_language=args.source_language,

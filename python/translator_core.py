@@ -668,6 +668,127 @@ def process_xml_part(
     return etree.tostring(tree, xml_declaration=True, encoding='UTF-8', standalone=True)
 
 
+def translate_pdf(
+    input_path: str,
+    output_path: str,
+    output_format: str = 'pdf',
+    custom_words: Dict[str, str] | None = None,
+    profile: str = 'academic',
+    source_language: str = 'auto',
+    target_language: str = 'en-GB',
+):
+    """Translate text-layer PDF blocks into a layout-preserving PDF or editable DOCX."""
+    global stats
+    import fitz
+
+    stats = {'translated': 0, 'cached': 0, 'skipped': 0, 'errors': 0}
+    translate_cache.clear()
+    profile = profile if profile in PROFILES else 'academic'
+    output_format = output_format if output_format in {'pdf', 'docx'} else 'pdf'
+    started_at = time.time()
+
+    document = fitz.open(input_path)
+    records = []
+    page_sizes = []
+    for page_index, page in enumerate(document):
+        page_sizes.append((page.rect.width, page.rect.height))
+        blocks = sorted(page.get_text('blocks'), key=lambda block: (round(block[1], 1), block[0]))
+        for block in blocks:
+            text = (block[4] or '').strip()
+            block_type = block[6] if len(block) > 6 else 0
+            if block_type != 0 or not is_translatable(text):
+                continue
+            records.append({
+                'page': page_index,
+                'rect': fitz.Rect(block[:4]),
+                'text': text,
+            })
+
+    if not records:
+        document.close()
+        raise ValueError(
+            'PDF tidak memiliki lapisan teks yang dapat diterjemahkan. '
+            'PDF hasil scan perlu menjalani OCR terlebih dahulu.'
+        )
+
+    translated = google_translate_paragraphs(
+        [record['text'] for record in records],
+        profile=profile,
+        custom_words=custom_words,
+        source_language=source_language,
+        target_language=target_language,
+    )
+
+    if output_format == 'pdf':
+        records_by_page = {}
+        for record, translated_text in zip(records, translated):
+            record['translated'] = translated_text
+            records_by_page.setdefault(record['page'], []).append(record)
+
+        for page_index, page_records in records_by_page.items():
+            page = document[page_index]
+            for record in page_records:
+                page.add_redact_annot(record['rect'], fill=(1, 1, 1))
+            page.apply_redactions()
+            for record in page_records:
+                rect = record['rect']
+                text = record['translated']
+                estimated_lines = max(1, text.count('\n') + 1)
+                font_size = min(11.0, max(5.5, rect.height / (estimated_lines * 1.35)))
+                while font_size >= 5.0:
+                    spare = page.insert_textbox(
+                        rect,
+                        text,
+                        fontsize=font_size,
+                        fontname='helv',
+                        color=(0, 0, 0),
+                        lineheight=1.05,
+                    )
+                    if spare >= 0:
+                        break
+                    font_size -= 0.75
+        document.save(output_path, garbage=4, deflate=True)
+        document.close()
+    else:
+        from docx import Document
+        from docx.shared import Inches, Pt
+
+        output_document = Document()
+        section = output_document.sections[0]
+        if page_sizes:
+            section.page_width = Inches(page_sizes[0][0] / 72)
+            section.page_height = Inches(page_sizes[0][1] / 72)
+        section.top_margin = section.bottom_margin = Inches(0.55)
+        section.left_margin = section.right_margin = Inches(0.6)
+
+        current_page = 0
+        for record, translated_text in zip(records, translated):
+            while record['page'] > current_page:
+                output_document.add_page_break()
+                current_page += 1
+            paragraph = output_document.add_paragraph()
+            paragraph.paragraph_format.space_after = Pt(5)
+            run = paragraph.add_run(translated_text)
+            run.font.name = 'Arial'
+            run.font.size = Pt(10)
+        output_document.save(output_path)
+        document.close()
+
+    return {
+        'translated': stats['translated'],
+        'cached': stats['cached'],
+        'skipped': stats['skipped'],
+        'errors': stats['errors'],
+        'elapsed_seconds': time.time() - started_at,
+        'pages': len(page_sizes),
+        'text_blocks': len(records),
+        'output_format': output_format,
+        'source_language': source_language,
+        'target_language': target_language,
+        'parallel_workers': PARALLEL_WORKERS,
+    }
+
+
 def translate_docx_v3(
     input_path: str,
     output_path: str,
