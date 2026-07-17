@@ -437,7 +437,32 @@ def _get_translator(source_language: str = 'auto', target_language: str = 'en-GB
 
 def translate_batch(batch_texts: List[str], source_language: str = 'auto', target_language: str = 'en-GB') -> List[str]:
     combined = SEPARATOR.join(batch_texts)
-    translated = _get_translator(source_language, target_language).translate(combined)
+    try:
+        translated = _get_translator(source_language, target_language).translate(combined)
+    except Exception as primary_error:
+        if not is_translation_service_failure(primary_error):
+            raise
+        # The mobile Google hostname intermittently fails DNS on some local
+        # Windows resolvers. Use Google's alternate translation hostname so a
+        # temporary failure of one hostname does not fail the whole document.
+        import requests
+        response = requests.get(
+            'https://translate.googleapis.com/translate_a/single',
+            params={
+                'client': 'gtx',
+                'sl': normalise_google_language(source_language),
+                'tl': normalise_google_language(target_language),
+                'dt': 't',
+                'q': combined,
+            },
+            timeout=30,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        translated = ''.join(
+            segment[0] for segment in (payload[0] or [])
+            if segment and segment[0]
+        )
     if SEPARATOR in translated:
         parts = translated.split(SEPARATOR)
     else:

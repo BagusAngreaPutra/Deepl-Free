@@ -61,6 +61,7 @@ class PythonWorker
                 'elapsed_seconds' => round(microtime(true) - $startedAt, 3),
                 'stderr' => mb_substr(trim($process->getErrorOutput()), 0, 4000),
                 'worker_error' => $message,
+                'worker_causes' => $payload['causes'] ?? null,
                 'output_is_json' => is_array($payload),
             ]);
             throw new RuntimeException($message);

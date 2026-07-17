@@ -159,4 +159,12 @@ if __name__ == '__main__':
     except SystemExit:
         raise
     except Exception as exc:
-        emit({'ok': False, 'error': str(exc)}, 1)
+        causes = []
+        current = exc
+        while current is not None and len(causes) < 8:
+            causes.append({
+                'type': type(current).__name__,
+                'message': str(current),
+            })
+            current = current.__cause__ or current.__context__
+        emit({'ok': False, 'error': str(exc), 'causes': causes}, 1)

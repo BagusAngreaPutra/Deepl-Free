@@ -117,6 +117,7 @@ class TranslatorController extends Controller
             Log::error('translation.failed', [
                 'request_id' => $requestId,
                 'elapsed_seconds' => round(microtime(true) - $startedAt, 3),
+                'preserved_input' => app()->environment('local') ? $input : null,
                 'exception' => $e,
             ]);
             return response()->json([
@@ -124,10 +125,13 @@ class TranslatorController extends Controller
                 'error_id' => $requestId,
             ], 500, ['X-Request-ID' => $requestId]);
         } finally {
-            @unlink($input);
+            if (!app()->environment('local') || is_file($output)) {
+                @unlink($input);
+            }
             Log::debug('translation.cleanup_completed', [
                 'request_id' => $requestId,
                 'input_removed' => !is_file($input),
+                'input_path' => is_file($input) ? $input : null,
             ]);
         }
     }
