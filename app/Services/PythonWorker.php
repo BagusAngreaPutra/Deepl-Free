@@ -27,7 +27,18 @@ class PythonWorker
 
         try {
             $process = new Process($command, base_path(), null, null, $timeout);
-            $process->run();
+            $process->run(function (string $type, string $buffer) use ($requestId, $operation): void {
+                if ($type !== Process::ERR) return;
+                foreach (preg_split('/\R/', trim($buffer)) as $line) {
+                    if (!str_starts_with($line, 'JDS_PROGRESS ')) continue;
+                    $progress = json_decode(substr($line, strlen('JDS_PROGRESS ')), true);
+                    Log::info('python_worker.progress', [
+                        'request_id' => $requestId,
+                        'operation' => $operation,
+                        ...(is_array($progress) ? $progress : ['message' => $line]),
+                    ]);
+                }
+            });
         } catch (Throwable $e) {
             Log::error('python_worker.could_not_start', [
                 'request_id' => $requestId,

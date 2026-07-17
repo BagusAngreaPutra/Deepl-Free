@@ -3,8 +3,10 @@ from __future__ import annotations
 import os
 import re
 import hashlib
+import json
 import shutil
 import sqlite3
+import sys
 import tempfile
 import time
 import zipfile
@@ -38,6 +40,14 @@ CACHE_VERSION = 'v2'
 translate_cache: Dict[str, str] = {}
 stats = {'translated': 0, 'cached': 0, 'skipped': 0, 'errors': 0}
 _persistent_cache_db: sqlite3.Connection | None = None
+
+
+def emit_progress(stage: str, **context) -> None:
+    print(
+        'JDS_PROGRESS '+json.dumps({'stage': stage, **context}, ensure_ascii=False),
+        file=sys.stderr,
+        flush=True,
+    )
 
 
 def persistent_cache_db() -> sqlite3.Connection:
@@ -478,6 +488,7 @@ def translate_batch_with_retry(
         except Exception as exc:
             last_error = exc
             if attempt + 1 < attempts:
+                emit_progress('translation_batch_retry', attempt=attempt + 1, error=str(exc)[:300])
                 time.sleep(0.6 * (2 ** attempt))
     raise last_error
 
@@ -545,6 +556,15 @@ def google_translate_paragraphs(
         to_translate.append((i, protected_text, replacements, cache_key))
 
     batches = build_translation_batches(to_translate)
+    emit_progress(
+        'translation_batches_started',
+        text_items=len(to_translate),
+        batches=len(batches),
+        parallel_workers=PARALLEL_WORKERS,
+        cached=stats['cached'],
+        skipped=stats['skipped'],
+    )
+    completed_batches = 0
     with ThreadPoolExecutor(max_workers=PARALLEL_WORKERS) as executor:
         future_batches = {
             executor.submit(
@@ -582,6 +602,17 @@ def google_translate_paragraphs(
                     except Exception:
                         results[idx] = texts[idx]
                         stats['errors'] += 1
+
+            completed_batches += 1
+            report_every = max(1, len(batches) // 10)
+            if completed_batches % report_every == 0 or completed_batches == len(batches):
+                emit_progress(
+                    'translation_batches_progress',
+                    completed=completed_batches,
+                    total=len(batches),
+                    translated=stats['translated'],
+                    errors=stats['errors'],
+                )
 
     persistent_cache_flush()
 
@@ -688,6 +719,7 @@ def translate_pdf(
     started_at = time.time()
 
     document = fitz.open(input_path)
+    emit_progress('pdf_opened', pages=len(document), output_format=output_format)
     records = []
     page_sizes = []
     for page_index, page in enumerate(document):
@@ -711,6 +743,9 @@ def translate_pdf(
             'PDF hasil scan perlu menjalani OCR terlebih dahulu.'
         )
 
+    emit_progress('pdf_text_extracted', pages=len(page_sizes), text_blocks=len(records))
+
+    translation_started = time.time()
     translated = google_translate_paragraphs(
         [record['text'] for record in records],
         profile=profile,
@@ -718,8 +753,17 @@ def translate_pdf(
         source_language=source_language,
         target_language=target_language,
     )
+    emit_progress(
+        'pdf_translation_completed',
+        elapsed_seconds=round(time.time() - translation_started, 2),
+        translated=stats['translated'],
+        cached=stats['cached'],
+        skipped=stats['skipped'],
+        errors=stats['errors'],
+    )
 
     if output_format == 'pdf':
+        emit_progress('pdf_output_started', pages=len(page_sizes))
         records_by_page = {}
         for record, translated_text in zip(records, translated):
             record['translated'] = translated_text
@@ -753,6 +797,7 @@ def translate_pdf(
         from docx import Document
         from docx.shared import Inches, Pt
 
+        emit_progress('docx_output_started', pages=len(page_sizes), text_blocks=len(records))
         output_document = Document()
         section = output_document.sections[0]
         if page_sizes:
@@ -773,6 +818,13 @@ def translate_pdf(
             run.font.size = Pt(10)
         output_document.save(output_path)
         document.close()
+
+    emit_progress(
+        'pdf_output_completed',
+        output_format=output_format,
+        output_size_bytes=os.path.getsize(output_path) if os.path.isfile(output_path) else None,
+        elapsed_seconds=round(time.time() - started_at, 2),
+    )
 
     return {
         'translated': stats['translated'],
