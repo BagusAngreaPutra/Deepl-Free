@@ -34,7 +34,7 @@ TRANSLATABLE_PARTS = [
 BATCH_SIZE = 20
 MAX_BATCH_CHARS = 4500
 SEPARATOR = '\nZXQSEP001ZXQ\n'
-PARALLEL_WORKERS = max(1, min(4, int(os.getenv('TRANSLATOR_PARALLEL_WORKERS', '3'))))
+PARALLEL_WORKERS = max(1, min(4, int(os.getenv('TRANSLATOR_PARALLEL_WORKERS', '1'))))
 CACHE_VERSION = 'v2'
 
 translate_cache: Dict[str, str] = {}
