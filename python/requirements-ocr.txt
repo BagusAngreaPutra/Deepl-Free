@@ -1,0 +1,4 @@
+# Optional image OCR support. This installs PyTorch and uses several GB.
+-r requirements.txt
+easyocr>=1.7.0
+Pillow>=10.0.0
