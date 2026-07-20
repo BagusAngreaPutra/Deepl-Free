@@ -5,6 +5,7 @@ import re
 import hashlib
 import json
 import shutil
+import socket
 import sqlite3
 import sys
 import tempfile
@@ -40,6 +41,87 @@ CACHE_VERSION = 'v2'
 translate_cache: Dict[str, str] = {}
 stats = {'translated': 0, 'cached': 0, 'skipped': 0, 'errors': 0}
 _persistent_cache_db: sqlite3.Connection | None = None
+_system_getaddrinfo = socket.getaddrinfo
+_dns_cache: Dict[str, list] = {}
+
+
+def _dns_cache_path() -> str:
+    return os.getenv(
+        'TRANSLATOR_DNS_CACHE_PATH',
+        os.path.abspath('storage/app/private/translator-dns-cache.json'),
+    )
+
+
+def _serialise_addresses(addresses: list) -> list:
+    return [
+        [family, socktype, proto, canonname, list(sockaddr)]
+        for family, socktype, proto, canonname, sockaddr in addresses
+    ]
+
+
+def _deserialise_addresses(addresses: list) -> list:
+    return [
+        (family, socktype, proto, canonname, tuple(sockaddr))
+        for family, socktype, proto, canonname, sockaddr in addresses
+    ]
+
+
+def _save_dns_cache() -> None:
+    cache_path = _dns_cache_path()
+    os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+    temporary_path = cache_path + '.tmp'
+    with open(temporary_path, 'w', encoding='utf-8') as handle:
+        json.dump(
+            {host: _serialise_addresses(value) for host, value in _dns_cache.items()},
+            handle,
+        )
+    os.replace(temporary_path, cache_path)
+
+
+def install_resilient_dns(hostnames: Tuple[str, ...] = (
+    'translate.google.com',
+    'translate.googleapis.com',
+    'clients5.google.com',
+)) -> None:
+    """Reuse last-known addresses when the Windows DNS resolver is intermittent."""
+    global _dns_cache
+    try:
+        with open(_dns_cache_path(), encoding='utf-8') as handle:
+            stored = json.load(handle)
+        _dns_cache.update({host: _deserialise_addresses(value) for host, value in stored.items()})
+    except (FileNotFoundError, OSError, ValueError, TypeError):
+        pass
+
+    cache_changed = False
+    for hostname in hostnames:
+        try:
+            _dns_cache[hostname] = _system_getaddrinfo(hostname, 443, type=socket.SOCK_STREAM)
+            cache_changed = True
+        except socket.gaierror:
+            pass
+    if cache_changed:
+        try:
+            _save_dns_cache()
+        except OSError as cache_error:
+            emit_progress('translation_dns_cache_write_failed', error=str(cache_error)[:300])
+
+    def resilient_getaddrinfo(host, port, *args, **kwargs):
+        try:
+            addresses = _system_getaddrinfo(host, port, *args, **kwargs)
+            if host in hostnames:
+                _dns_cache[host] = addresses
+            return addresses
+        except socket.gaierror:
+            cached = _dns_cache.get(host)
+            if not cached:
+                raise
+            emit_progress('translation_dns_cache_used', hostname=host)
+            return [
+                (family, socktype, proto, canonname, (sockaddr[0], port, *sockaddr[2:]))
+                for family, socktype, proto, canonname, sockaddr in cached
+            ]
+
+    socket.getaddrinfo = resilient_getaddrinfo
 
 
 def emit_progress(stage: str, **context) -> None:
@@ -435,6 +517,55 @@ def _get_translator(source_language: str = 'auto', target_language: str = 'en-GB
     )
 
 
+def _translate_with_google_fallbacks(
+    text: str,
+    source_language: str,
+    target_language: str,
+) -> str:
+    """Try independent Google web endpoints when deep-translator is unavailable."""
+    import requests
+
+    language_params = {
+        'sl': normalise_google_language(source_language),
+        'tl': normalise_google_language(target_language),
+        'q': text,
+    }
+    endpoints = (
+        (
+            'https://translate.googleapis.com/translate_a/single',
+            {'client': 'gtx', 'dt': 't', **language_params},
+            lambda payload: ''.join(
+                segment[0] for segment in (payload[0] or [])
+                if segment and segment[0]
+            ),
+        ),
+        (
+            'https://clients5.google.com/translate_a/t',
+            {'client': 'dict-chrome-ex', **language_params},
+            lambda payload: payload[0],
+        ),
+    )
+    errors = []
+    for url, params, extract_translation in endpoints:
+        try:
+            response = requests.get(url, params=params, timeout=(5, 30))
+            response.raise_for_status()
+            translated = extract_translation(response.json())
+            if not isinstance(translated, str) or not translated:
+                raise ValueError('Respons layanan terjemahan kosong atau tidak valid.')
+            return translated
+        except Exception as endpoint_error:
+            errors.append(endpoint_error)
+
+    # Preserve every endpoint error in diagnostics while keeping the last
+    # network exception as the cause inspected by the retry classifier.
+    emit_progress(
+        'translation_fallbacks_failed',
+        errors=[str(error)[:300] for error in errors],
+    )
+    raise errors[-1]
+
+
 def translate_batch(batch_texts: List[str], source_language: str = 'auto', target_language: str = 'en-GB') -> List[str]:
     combined = SEPARATOR.join(batch_texts)
     try:
@@ -442,26 +573,10 @@ def translate_batch(batch_texts: List[str], source_language: str = 'auto', targe
     except Exception as primary_error:
         if not is_translation_service_failure(primary_error):
             raise
-        # The mobile Google hostname intermittently fails DNS on some local
-        # Windows resolvers. Use Google's alternate translation hostname so a
-        # temporary failure of one hostname does not fail the whole document.
-        import requests
-        response = requests.get(
-            'https://translate.googleapis.com/translate_a/single',
-            params={
-                'client': 'gtx',
-                'sl': normalise_google_language(source_language),
-                'tl': normalise_google_language(target_language),
-                'dt': 't',
-                'q': combined,
-            },
-            timeout=30,
-        )
-        response.raise_for_status()
-        payload = response.json()
-        translated = ''.join(
-            segment[0] for segment in (payload[0] or [])
-            if segment and segment[0]
+        # Use endpoints on separate hostnames so a transient DNS failure on
+        # translate.google.com or translate.googleapis.com is recoverable.
+        translated = _translate_with_google_fallbacks(
+            combined, source_language, target_language
         )
     if SEPARATOR in translated:
         parts = translated.split(SEPARATOR)
@@ -573,6 +688,7 @@ def google_translate_paragraphs(
     source_language: str = 'auto',
     target_language: str = 'en-GB',
 ) -> List[str]:
+    install_resilient_dns()
     results = [''] * len(texts)
     to_translate: List[Tuple[int, str, Dict[str, str], str]] = []
 
