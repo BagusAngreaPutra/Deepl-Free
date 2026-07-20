@@ -60,6 +60,26 @@ class ResilientDnsTest(unittest.TestCase):
         self.assertEqual('142.250.4.95', result[0][4][0])
         save.assert_not_called()
 
+    @patch.object(translator_core, '_save_dns_cache')
+    @patch.object(translator_core, '_dns_cache_path')
+    @patch.object(translator_core, '_resolve_ipv4_over_https')
+    @patch.object(translator_core, '_system_getaddrinfo')
+    def test_bootstraps_empty_cache_without_system_dns(
+        self, getaddrinfo, resolve_over_https, cache_path, save
+    ):
+        cache_path.return_value = 'missing-dns-cache.json'
+        getaddrinfo.side_effect = translator_core.socket.gaierror('DNS unavailable')
+        resolved = [(2, 1, 6, '', ('142.251.12.95', 443))]
+        resolve_over_https.return_value = resolved
+        translator_core._dns_cache = {}
+
+        translator_core.install_resilient_dns(('translate.googleapis.com',))
+        result = translator_core.socket.getaddrinfo('translate.googleapis.com', 443)
+
+        self.assertEqual(resolved, result)
+        resolve_over_https.assert_called_once_with('translate.googleapis.com')
+        save.assert_called_once()
+
 
 if __name__ == '__main__':
     unittest.main()

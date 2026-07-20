@@ -78,6 +78,46 @@ def _save_dns_cache() -> None:
     os.replace(temporary_path, cache_path)
 
 
+def _resolve_ipv4_over_https(hostname: str) -> list:
+    """Bootstrap DNS through a literal IP when the hosting resolver is down."""
+    import requests
+
+    errors = []
+    for resolver_ip in ('1.1.1.1', '1.0.0.1'):
+        try:
+            response = requests.get(
+                f'https://{resolver_ip}/dns-query',
+                params={'name': hostname, 'type': 'A'},
+                headers={
+                    'Accept': 'application/dns-json',
+                    'Host': 'cloudflare-dns.com',
+                },
+                timeout=(5, 10),
+            )
+            response.raise_for_status()
+            payload = response.json()
+            addresses = [
+                answer['data'] for answer in payload.get('Answer', [])
+                if answer.get('type') == 1 and answer.get('data')
+            ]
+            if addresses:
+                emit_progress(
+                    'translation_dns_bootstrapped',
+                    hostname=hostname,
+                    addresses=len(addresses),
+                )
+                return [
+                    (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, '', (address, 443))
+                    for address in addresses
+                ]
+            raise ValueError('DNS-over-HTTPS tidak mengembalikan alamat IPv4.')
+        except Exception as resolver_error:
+            errors.append(str(resolver_error)[:300])
+
+    emit_progress('translation_dns_bootstrap_failed', hostname=hostname, errors=errors)
+    return []
+
+
 def install_resilient_dns(hostnames: Tuple[str, ...] = (
     'translate.google.com',
     'translate.googleapis.com',
@@ -98,7 +138,11 @@ def install_resilient_dns(hostnames: Tuple[str, ...] = (
             _dns_cache[hostname] = _system_getaddrinfo(hostname, 443, type=socket.SOCK_STREAM)
             cache_changed = True
         except socket.gaierror:
-            pass
+            if hostname not in _dns_cache:
+                resolved = _resolve_ipv4_over_https(hostname)
+                if resolved:
+                    _dns_cache[hostname] = resolved
+                    cache_changed = True
     if cache_changed:
         try:
             _save_dns_cache()
