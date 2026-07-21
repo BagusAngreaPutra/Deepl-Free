@@ -8,15 +8,18 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 use Throwable;
 
 class TranslatorController extends Controller
 {
     private const DEFAULT_PROFILE = 'academic';
+
     private const SOURCE_LANGUAGES = [
         'auto', 'id', 'en-US', 'en-GB', 'de', 'fr', 'es', 'pt', 'it', 'nl',
         'pl', 'ru', 'ar', 'tr', 'zh-CN', 'ja', 'ko', 'vi', 'th', 'ms',
     ];
+
     private const TARGET_LANGUAGES = [
         'id', 'en-US', 'en-GB', 'de', 'fr', 'es', 'pt', 'it', 'nl', 'pl',
         'ru', 'ar', 'tr', 'zh-CN', 'ja', 'ko', 'vi', 'th', 'ms',
@@ -73,6 +76,7 @@ class TranslatorController extends Controller
             ]);
         } catch (Throwable $e) {
             Log::error('text_translation.failed', ['request_id' => $requestId, 'exception' => $e]);
+
             return response()->json([
                 'error' => 'Terjemahan teks gagal: '.$e->getMessage(),
                 'error_id' => $requestId,
@@ -80,7 +84,7 @@ class TranslatorController extends Controller
         }
     }
 
-    public function translate(Request $request): JsonResponse|BinaryFileResponse
+    public function translate(Request $request): JsonResponse|BinaryFileResponse|StreamedResponse
     {
         $requestId = (string) Str::uuid();
         $startedAt = microtime(true);
@@ -112,7 +116,9 @@ class TranslatorController extends Controller
         ]);
         $token = Str::lower(Str::random(10));
         $directory = storage_path('app/private/translator');
-        if (!is_dir($directory)) mkdir($directory, 0775, true);
+        if (! is_dir($directory)) {
+            mkdir($directory, 0775, true);
+        }
         $input = $directory.DIRECTORY_SEPARATOR.$token.'_input.docx';
         $stem = pathinfo($file->getClientOriginalName(), PATHINFO_FILENAME) ?: 'document';
         $targetLanguage = $request->string('target_language')->value() ?: 'en-GB';
@@ -125,55 +131,90 @@ class TranslatorController extends Controller
             'directory_writable' => is_writable($directory),
         ]);
 
-        try {
-            $result = $this->worker->run('docx', [
-                '--input', $input, '--output', $output,
-                '--profile', $request->string('profile')->value() ?: self::DEFAULT_PROFILE,
-                '--custom-words', base64_encode($request->string('custom_words')->value()),
-                '--source-language', $request->string('source_language')->value() ?: 'auto',
-                '--target-language', $targetLanguage,
-            ], $requestId);
-            $summary = $result['summary'];
-            Log::info('translation.completed', [
-                'request_id' => $requestId,
-                'elapsed_seconds' => round(microtime(true) - $startedAt, 3),
-                'output_exists' => is_file($output),
-                'output_size_bytes' => is_file($output) ? filesize($output) : null,
-                'summary' => $summary,
-            ]);
-            return response()->download($output, $downloadName, [
-                'Content-Type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-                'X-Translated-Paragraphs' => (string) ($summary['translated'] ?? 0),
-                'X-Cached-Paragraphs' => (string) ($summary['cached'] ?? 0),
-                'X-Skipped-Paragraphs' => (string) ($summary['skipped'] ?? 0),
-                'X-Errors' => (string) ($summary['errors'] ?? 0),
-                'X-Elapsed-Seconds' => number_format($summary['elapsed_seconds'] ?? 0, 1, '.', ''),
-                'X-Profile' => (string) ($summary['profile'] ?? self::DEFAULT_PROFILE),
-                'X-Target-Language' => $targetLanguage,
-                'X-Request-ID' => $requestId,
-            ])->deleteFileAfterSend(true);
-        } catch (Throwable $e) {
-            @unlink($output);
-            Log::error('translation.failed', [
-                'request_id' => $requestId,
-                'elapsed_seconds' => round(microtime(true) - $startedAt, 3),
-                'preserved_input' => app()->environment('local') ? $input : null,
-                'exception' => $e,
-            ]);
-            return response()->json([
-                'error' => 'Terjadi kesalahan saat memproses dokumen: '.$e->getMessage(),
-                'error_id' => $requestId,
-            ], 500, ['X-Request-ID' => $requestId]);
-        } finally {
-            if (!app()->environment('local') || is_file($output)) {
+        return response()->stream(function () use (
+            $input, $output, $downloadName, $targetLanguage, $request, $requestId, $startedAt, $token
+        ): void {
+            $send = static function (array $event): void {
+                echo json_encode($event, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)."\n";
+                if (ob_get_level() > 0) {
+                    @ob_flush();
+                }
+                flush();
+            };
+
+            $send(['type' => 'progress', 'stage' => 'document_received', 'percent' => 12]);
+
+            try {
+                $result = $this->worker->run('docx', [
+                    '--input', $input, '--output', $output,
+                    '--profile', $request->string('profile')->value() ?: self::DEFAULT_PROFILE,
+                    '--custom-words', base64_encode($request->string('custom_words')->value()),
+                    '--source-language', $request->string('source_language')->value() ?: 'auto',
+                    '--target-language', $targetLanguage,
+                ], $requestId, static function (array $progress) use ($send): void {
+                    $send(['type' => 'progress', ...$progress]);
+                });
+                $summary = $result['summary'];
+                file_put_contents($output.'.json', json_encode([
+                    'name' => $downloadName,
+                    'created_at' => time(),
+                ], JSON_UNESCAPED_UNICODE));
+                Log::info('translation.completed', [
+                    'request_id' => $requestId,
+                    'elapsed_seconds' => round(microtime(true) - $startedAt, 3),
+                    'output_size_bytes' => is_file($output) ? filesize($output) : null,
+                    'summary' => $summary,
+                ]);
+                $send([
+                    'type' => 'complete',
+                    'percent' => 100,
+                    'download_url' => route('translation.download', ['token' => $token]),
+                    'download_name' => $downloadName,
+                    'summary' => $summary,
+                ]);
+            } catch (Throwable $e) {
+                @unlink($output);
+                Log::error('translation.failed', [
+                    'request_id' => $requestId,
+                    'elapsed_seconds' => round(microtime(true) - $startedAt, 3),
+                    'exception' => $e,
+                ]);
+                $send([
+                    'type' => 'error',
+                    'error' => 'Terjadi kesalahan saat memproses dokumen: '.$e->getMessage(),
+                    'error_id' => $requestId,
+                ]);
+            } finally {
                 @unlink($input);
             }
-            Log::debug('translation.cleanup_completed', [
-                'request_id' => $requestId,
-                'input_removed' => !is_file($input),
-                'input_path' => is_file($input) ? $input : null,
-            ]);
+        }, 200, [
+            'Content-Type' => 'application/x-ndjson; charset=UTF-8',
+            'Cache-Control' => 'no-cache, no-store',
+            'X-Accel-Buffering' => 'no',
+            'X-Request-ID' => $requestId,
+        ]);
+    }
+
+    public function downloadTranslation(string $token): BinaryFileResponse|JsonResponse
+    {
+        if (! preg_match('/^[a-z0-9]{10}$/', $token)) {
+            abort(404);
         }
+
+        $output = storage_path('app/private/translator/'.$token.'_output.docx');
+        $metadataPath = $output.'.json';
+        if (! is_file($output) || ! is_file($metadataPath)) {
+            return response()->json(['error' => 'Hasil terjemahan tidak ditemukan atau sudah diunduh.'], 404);
+        }
+
+        $metadata = json_decode((string) file_get_contents($metadataPath), true);
+        @unlink($metadataPath);
+
+        return response()->download(
+            $output,
+            $metadata['name'] ?? 'translated.docx',
+            ['Content-Type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+        )->deleteFileAfterSend(true);
     }
 
     public function ocrTranslate(Request $request): JsonResponse|BinaryFileResponse
@@ -190,7 +231,9 @@ class TranslatorController extends Controller
         $file = $request->file('image_file');
         $token = Str::lower(Str::random(10));
         $directory = storage_path('app/private/translator');
-        if (!is_dir($directory)) mkdir($directory, 0775, true);
+        if (! is_dir($directory)) {
+            mkdir($directory, 0775, true);
+        }
         $input = $directory.DIRECTORY_SEPARATOR.$token.'_image';
         $output = $directory.DIRECTORY_SEPARATOR.$token.'_translated.png';
         $file->move($directory, basename($input));
@@ -201,12 +244,14 @@ class TranslatorController extends Controller
                 '--profile', $request->string('profile')->value() ?: self::DEFAULT_PROFILE,
                 '--custom-words', base64_encode($request->string('custom_words')->value()),
             ], $token);
+
             return response()->download($output, 'translated_'.$token.'.png', ['Content-Type' => 'image/png'])
                 ->deleteFileAfterSend(true);
         } catch (Throwable $e) {
             @unlink($output);
             report($e);
             $status = str_contains($e->getMessage(), 'OCR tidak tersedia') ? 503 : 500;
+
             return response()->json(['error' => $e->getMessage()], $status);
         } finally {
             @unlink($input);
@@ -240,7 +285,9 @@ class TranslatorController extends Controller
         $fileSize = $file->getSize();
         $token = Str::lower(Str::random(10));
         $directory = storage_path('app/private/translator');
-        if (!is_dir($directory)) mkdir($directory, 0775, true);
+        if (! is_dir($directory)) {
+            mkdir($directory, 0775, true);
+        }
         $input = $directory.DIRECTORY_SEPARATOR.$token.'_input.pdf';
         $outputFormat = $request->string('output_format')->value();
         $output = $directory.DIRECTORY_SEPARATOR.$token.'_output.'.$outputFormat;
@@ -277,6 +324,7 @@ class TranslatorController extends Controller
             $contentType = $outputFormat === 'pdf'
                 ? 'application/pdf'
                 : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+
             return response()->download($output, $downloadName, [
                 'Content-Type' => $contentType,
                 'X-Request-ID' => $requestId,
@@ -290,6 +338,7 @@ class TranslatorController extends Controller
                 'elapsed_seconds' => round(microtime(true) - $startedAt, 3),
                 'exception' => $e,
             ]);
+
             return response()->json([
                 'error' => 'Terjadi kesalahan saat memproses PDF: '.$e->getMessage(),
                 'error_id' => $requestId,

@@ -8,8 +8,17 @@ import translator_core
 
 
 class GoogleFallbackTest(unittest.TestCase):
-    @patch('requests.get')
-    def test_uses_clients_endpoint_when_googleapis_dns_fails(self, get):
+    def test_recognises_windows_socket_provider_failure(self):
+        error = ConnectionError(
+            'Failed to establish a new connection: [WinError 10106] '
+            'The requested service provider could not be loaded'
+        )
+
+        self.assertTrue(translator_core.is_translation_service_failure(error))
+
+    @patch.object(translator_core, '_http_session')
+    def test_uses_clients_endpoint_when_googleapis_dns_fails(self, http_session):
+        get = http_session.return_value.get
         dns_failure = ConnectionError('Failed to resolve translate.googleapis.com')
         clients_response = Mock()
         clients_response.raise_for_status.return_value = None
@@ -24,8 +33,9 @@ class GoogleFallbackTest(unittest.TestCase):
         self.assertEqual(2, get.call_count)
         self.assertIn('clients5.google.com', get.call_args.args[0])
 
-    @patch('requests.get')
-    def test_parses_googleapis_segment_response(self, get):
+    @patch.object(translator_core, '_http_session')
+    def test_parses_googleapis_segment_response(self, http_session):
+        get = http_session.return_value.get
         response = Mock()
         response.raise_for_status.return_value = None
         response.json.return_value = [[['Good ', 'Selamat '], ['morning', 'pagi']]]

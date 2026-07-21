@@ -10,6 +10,8 @@ Route::get('/brand-logo', fn () => response()->file(
 ))->name('brand.logo');
 Route::get('/health', [TranslatorController::class, 'health'])->name('health');
 Route::post('/translate', [TranslatorController::class, 'translate'])->name('translate');
+Route::get('/translation-download/{token}', [TranslatorController::class, 'downloadTranslation'])
+    ->name('translation.download');
 Route::post('/translate-text', [TranslatorController::class, 'translateText'])->name('translate.text');
 Route::post('/translate-pdf', [TranslatorController::class, 'translatePdf'])->name('translate.pdf');
 Route::post('/ocr-translate', [TranslatorController::class, 'ocrTranslate'])->name('ocr.translate');

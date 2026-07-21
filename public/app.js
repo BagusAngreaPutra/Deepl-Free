@@ -291,6 +291,8 @@ function processFile(item) {
   data.append('source_language', sourceLanguage.value);
   data.append('target_language', targetLanguage.value);
 
+  if (item.type === 'docx') return processDocxWithLiveProgress(item, data);
+
   return new Promise((resolve) => {
     const xhr = new XMLHttpRequest();
     xhr.open('POST', item.type === 'pdf' ? '/translate-pdf' : '/translate');
@@ -329,6 +331,106 @@ function processFile(item) {
     };
     xhr.send(data);
   });
+}
+
+function processDocxWithLiveProgress(item, data) {
+  return new Promise((resolve) => {
+    const xhr = new XMLHttpRequest();
+    let consumed = 0;
+
+    xhr.open('POST', '/translate');
+    xhr.setRequestHeader('X-CSRF-TOKEN', csrfToken);
+    xhr.upload.onprogress = (event) => {
+      if (!event.lengthComputable) return;
+      item.progress = Math.min(10, Math.round((event.loaded / event.total) * 10));
+      item.message = 'Mengunggah';
+      render();
+    };
+    xhr.upload.onload = () => {
+      item.state = 'processing';
+      item.progress = Math.max(item.progress, 12);
+      item.message = 'Membaca dokumen';
+      render();
+    };
+    xhr.onprogress = () => {
+      const chunk = xhr.responseText.slice(consumed);
+      const lastNewline = chunk.lastIndexOf('\n');
+      if (lastNewline < 0) return;
+      consumed += lastNewline + 1;
+      chunk.slice(0, lastNewline).split('\n').filter(Boolean).forEach((line) => {
+        try { applyLiveEvent(item, JSON.parse(line)); } catch (_) { /* wait for valid event */ }
+      });
+    };
+    xhr.onload = () => {
+      xhr.onprogress();
+      if (xhr.status >= 400 && item.state !== 'error') {
+        item.state = 'error';
+        item.progress = 100;
+        item.message = 'Proses gagal di server';
+        render();
+      }
+      resolve();
+    };
+    xhr.onerror = () => {
+      item.state = 'error';
+      item.progress = 100;
+      item.message = 'Koneksi ke server terputus';
+      render();
+      showToast(`Gagal: ${item.file.name}`, item.message);
+      resolve();
+    };
+    xhr.send(data);
+  });
+}
+
+function applyLiveEvent(item, event) {
+  if (event.type === 'complete') {
+    item.state = 'done';
+    item.progress = 100;
+    item.message = `Selesai · ${event.summary?.translated || 0} teks diterjemahkan`;
+    item.downloadUrl = event.download_url;
+    item.downloadName = event.download_name;
+    render();
+    downloadResult(item);
+    return;
+  }
+  if (event.type === 'error') {
+    item.state = 'error';
+    item.progress = 100;
+    item.message = event.error_id ? `${event.error} (ID: ${event.error_id})` : event.error;
+    render();
+    showToast(`Gagal: ${item.file.name}`, item.message);
+    return;
+  }
+
+  let percent = event.percent || item.progress;
+  let message = 'Sedang memproses';
+  if (event.stage === 'translation_batches_started') {
+    percent = 18;
+    message = `${event.batches} batch siap · ${event.parallel_workers} worker`;
+  } else if (event.stage === 'translation_batches_progress') {
+    percent = 18 + Math.round((event.completed / Math.max(1, event.total)) * 70);
+    message = `Menerjemahkan batch ${event.completed}/${event.total}`;
+  } else if (event.stage === 'translation_batch_retry') {
+    message = `Koneksi dicoba ulang (${event.attempt}/${event.maximum_attempts})`;
+  } else if (event.stage === 'docx_part_started') {
+    message = `Memproses bagian dokumen ${event.current}/${event.total}`;
+  } else if (event.stage === 'docx_part_completed') {
+    percent = 88 + Math.round((event.current / Math.max(1, event.total)) * 7);
+    message = `Bagian dokumen ${event.current}/${event.total} selesai`;
+  } else if (event.stage === 'docx_output_started') {
+    percent = 96;
+    message = 'Menyusun file hasil';
+  } else if (event.stage === 'docx_output_completed') {
+    percent = 99;
+    message = 'Menyiapkan unduhan';
+  } else if (event.stage === 'document_received') {
+    message = 'Dokumen diterima server';
+  }
+  item.state = 'processing';
+  item.progress = Math.max(item.progress, Math.min(99, percent));
+  item.message = message;
+  render();
 }
 
 function downloadResult(item) {

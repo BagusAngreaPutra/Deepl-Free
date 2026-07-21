@@ -9,6 +9,7 @@ import socket
 import sqlite3
 import sys
 import tempfile
+import threading
 import time
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -43,6 +44,20 @@ stats = {'translated': 0, 'cached': 0, 'skipped': 0, 'errors': 0}
 _persistent_cache_db: sqlite3.Connection | None = None
 _system_getaddrinfo = socket.getaddrinfo
 _dns_cache: Dict[str, list] = {}
+_http_sessions = threading.local()
+
+
+def _http_session():
+    """Reuse HTTPS connections per translation thread instead of exhausting Winsock."""
+    import requests
+
+    session = getattr(_http_sessions, 'session', None)
+    if session is None:
+        session = requests.Session()
+        adapter = requests.adapters.HTTPAdapter(pool_connections=2, pool_maxsize=2, max_retries=0)
+        session.mount('https://', adapter)
+        _http_sessions.session = session
+    return session
 
 
 def _dns_cache_path() -> str:
@@ -592,7 +607,7 @@ def _translate_with_google_fallbacks(
     errors = []
     for url, params, extract_translation in endpoints:
         try:
-            response = requests.get(url, params=params, timeout=(5, 30))
+            response = _http_session().get(url, params=params, timeout=(5, 30))
             response.raise_for_status()
             translated = extract_translation(response.json())
             if not isinstance(translated, str) or not translated:
@@ -613,15 +628,15 @@ def _translate_with_google_fallbacks(
 def translate_batch(batch_texts: List[str], source_language: str = 'auto', target_language: str = 'en-GB') -> List[str]:
     combined = SEPARATOR.join(batch_texts)
     try:
-        translated = _get_translator(source_language, target_language).translate(combined)
-    except Exception as primary_error:
-        if not is_translation_service_failure(primary_error):
-            raise
-        # Use endpoints on separate hostnames so a transient DNS failure on
-        # translate.google.com or translate.googleapis.com is recoverable.
         translated = _translate_with_google_fallbacks(
             combined, source_language, target_language
         )
+    except Exception as primary_error:
+        if not is_translation_service_failure(primary_error):
+            raise
+        # Keep deep-translator as a final independent fallback, while the
+        # pooled API connections remain the fast and stable normal path.
+        translated = _get_translator(source_language, target_language).translate(combined)
     if SEPARATOR in translated:
         parts = translated.split(SEPARATOR)
     else:
@@ -697,6 +712,8 @@ def is_translation_service_failure(error: Exception) -> bool:
     markers = (
         'failed to resolve', 'nameresolutionerror', 'getaddrinfo failed',
         'connection refused', 'connection aborted', 'network is unreachable',
+        'failed to establish a new connection', 'max retries exceeded',
+        'requested service provider could not be loaded', 'winerror 10106',
         'too many requests', '429 client error',
     )
     return any(marker in message for marker in markers)
@@ -1095,8 +1112,15 @@ def translate_docx_v3(
 
         parts_found = [p for p in parts_to_process if p in all_names]
         translated_parts = {}
+        emit_progress('docx_parts_started', total=len(parts_found))
 
-        for part_name in parts_found:
+        for part_index, part_name in enumerate(parts_found, start=1):
+            emit_progress(
+                'docx_part_started',
+                current=part_index,
+                total=len(parts_found),
+                part=part_name,
+            )
             with zipfile.ZipFile(tmp_docx, 'r') as z:
                 xml_content = z.read(part_name)
             translated_parts[part_name] = process_xml_part(
@@ -1106,8 +1130,10 @@ def translate_docx_v3(
                 source_language=source_language,
                 target_language=target_language,
             )
+            emit_progress('docx_part_completed', current=part_index, total=len(parts_found))
 
         tmp_output = os.path.join(tmp_dir, 'output.docx')
+        emit_progress('docx_output_started')
         with zipfile.ZipFile(tmp_docx, 'r') as zin:
             with zipfile.ZipFile(tmp_output, 'w', compression=zipfile.ZIP_DEFLATED) as zout:
                 for item in zin.infolist():
@@ -1117,6 +1143,7 @@ def translate_docx_v3(
                         zout.writestr(item, zin.read(item.filename))
 
         shutil.copy2(tmp_output, output_path)
+        emit_progress('docx_output_completed')
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
